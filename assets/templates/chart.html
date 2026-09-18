@@ -3,126 +3,236 @@
 <head>
 <meta charset="utf-8" />
 <style>
-  html, body { margin: 0; padding: 0; overflow: hidden; background: #06080f; }
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #04060c; }
   #stage { position: absolute; inset: 0; }
-  canvas { display: block; }
+  #particles { position: absolute; inset: 0; }
+  .layer { position: absolute; inset: 0; will-change: transform; }
 </style>
 </head>
 <body>
 <div id="stage"></div>
-<canvas id="plot"></canvas>
+<script src="../runtime/anim.js"></script>
+<script src="../runtime/kit.js"></script>
 <script>
-// chart: animated bar chart drawn on canvas. Data in, honest chart out.
+// chart: the bars do not just grow once - they re-rank, re-scale and count on every beat, which is
+// what makes a data shot move instead of sitting there as a finished picture.
 const S = window.SCENE || {};
+const V = S.visual || {};
+const M = S.motion || {};
+const CH = S.choreography || { beats: [{ t: 0, kind: "establish", intensity: 1 }] };
 const D = S.duration || 10;
-const stage = document.getElementById("stage");
-const cv = document.getElementById("plot");
-const ctx = cv.getContext("2d");
-const accent = S.accent || "#e0455f";
-const COL = Object.assign({ bg: "#080c18", text: "#f6f8fc", dim: "#8f9db4" }, S.colors || {});
+const C = Object.assign({
+  bg: "#080c18", surface: "#111729", border: "#243049", text: "#f6f8fc", dim: "#8f9db4",
+  accent: "#e0455f", accent2: "#38bdf8", accent3: "#a78bfa",
+  series: ["#e0455f", "#38bdf8", "#a78bfa", "#4ade80", "#fbbf24"]
+}, V.colors || {});
+const SHAKE = M.shake || { amp: 1.5, decay: 0.3, freq: 13 };
+const DEPTH = M.depth || { bg: 0.3, mid: 0.75, fg: 1.15 };
+const PARTICLES = M.particles || { count: 20, speed: 18, size: 2, opacity: 0.24, vertical: 8, mode: "dust" };
+const TS = V.type_scale || 1;
+const TEX = V.texture || "none";
+const TEX_AMOUNT = V.texture_amount || 0.1;
+const VIGNETTE = V.vignette || 0.24;
+const H = () => window.innerHeight, W = () => window.innerWidth;
 
-const clamp01 = (x) => Math.min(1, Math.max(0, x));
-const easeOutCubic = (x) => 1 - Math.pow(1 - x, 3);
-const easeOutQuint = (x) => 1 - Math.pow(1 - x, 5);
-
-function hexA(hex, a) {
-  const h = hex.replace("#", "");
-  const n = parseInt(h.length === 3 ? h.split("").map(c => c + c).join("") : h, 16);
-  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
-}
-
-const SERIES = (S.series || []).slice(0, 12);
-const CHART = S.chart || {};
-const UNIT = CHART.unit || S.unit || "";
-const MAXV = Number(CHART.max || Math.max(...SERIES.map((d) => Number(d.value) || 0), 1));
-const COLORS = ["#e0455f", "#38bdf8", "#a78bfa", "#4ade80", "#fbbf24", "#f472b6"];
+const SERIES = (S.series || []).slice(0, 8).map((d, i) => ({
+  label: d.label || `Item ${i + 1}`, value: Number(d.value) || 0,
+  alt: d.alt === undefined ? null : Number(d.alt), color: d.color || null
+}));
+const SERIES_ALT = S.seriesAlt || null;
+const UNIT = (S.chart && S.chart.unit) || S.unit || "";
+const MAXV = Number((S.chart && S.chart.max) || Math.max(...SERIES.map(d => d.value), 1));
+const DEC = Number(S.decimals || 0);
 
 let L = null;
+
 function build() {
-  const s = window.innerHeight / 720;
+  const s = H() / 720;
   stage.innerHTML = "";
   stage.style.background =
-    `radial-gradient(${60 * s}% ${60 * s}% at 12% 12%, ${hexA(accent, 0.14)} 0%, ${hexA(accent, 0)} 60%),` +
-    `linear-gradient(160deg, #0d1428 0%, ${COL.bg} 60%, #05070e 100%)`;
-  cv.width = window.innerWidth; cv.height = window.innerHeight;
-  const mk = (css, text) => {
-    const n = document.createElement("div");
-    Object.assign(n.style, css);
-    if (text !== undefined) n.textContent = text;
-    stage.appendChild(n);
-    return n;
-  };
-  const heading = mk({ position: "absolute", left: `${92 * s}px`, top: `${96 * s}px`, opacity: "0",
-    fontSize: `${(S.titleSize || 40) * s}px`, fontWeight: "500", color: COL.text }, S.title || "");
-  const sub = mk({ position: "absolute", left: `${94 * s}px`, top: `${152 * s}px`, opacity: "0",
-    fontSize: `${17 * s}px`, color: COL.dim }, S.subtitle || "");
-  const axisUnit = mk({ position: "absolute", left: `${92 * s}px`, top: `${198 * s}px`, opacity: "0",
-    fontSize: `${13 * s}px`, letterSpacing: `${1.4 * s}px`, color: "#5d6b83" }, UNIT ? `单位：${UNIT}` : "");
-  const footer = mk({ position: "absolute", left: `${92 * s}px`, top: `${650 * s}px`, opacity: "0",
-    fontSize: `${12 * s}px`, color: "#5d6b83" }, S.footer || "");
-  return { heading, sub, axisUnit, footer, s };
+    `radial-gradient(${60 * s}% ${60 * s}% at 12% 12%, ${Kit.rgba(C.accent, 0.12)} 0%, ${Kit.rgba(C.accent, 0)} 60%),` +
+    `linear-gradient(160deg, #0d1428 0%, ${C.bg} 60%, #05070e 100%)`;
+  const kit = Kit.buildStage(stage, {});
+  const scene = new Anim.Scene();
+  const particles = Kit.seedParticles(PARTICLES, S.id || "chart", W(), H());
+
+  const tex = Kit.el(kit.layerBg, "div", Object.assign({ position: "absolute", inset: "0", opacity: "0" },
+                                                       Kit.textureCss(TEX, C.border, TEX_AMOUNT)));
+  const halo = Kit.el(kit.layerBg, "div", { position: "absolute", right: `${-100 * s}px`, top: `${-80 * s}px`,
+    width: `${900 * s}px`, height: `${820 * s}px`, opacity: "0", pointerEvents: "none",
+    background: `radial-gradient(closest-side, ${Kit.rgba(C.accent, 0.2)}, ${Kit.rgba(C.accent, 0)} 70%)` });
+  const sweep = Kit.el(kit.layerBg, "div", { position: "absolute", top: `${-40 * s}%`, height: `${180 * s}%`,
+    width: `${((M.sweep && M.sweep.width) || 260) * s}px`, opacity: "0", pointerEvents: "none",
+    background: `linear-gradient(90deg, ${Kit.rgba(C.text, 0)}, ${Kit.rgba(C.text, (M.sweep && M.sweep.opacity) || 0.09)}, ${Kit.rgba(C.text, 0)})`,
+    filter: `blur(${26 * s}px)`, transform: `rotate(${(M.sweep && M.sweep.angle) || 0}deg)` });
+  const vign = Kit.el(kit.layerBg, "div", { position: "absolute", inset: "0", opacity: "0", pointerEvents: "none",
+    background: `radial-gradient(80% 80% at 50% 46%, rgba(0,0,0,0) 42%, rgba(0,0,0,${VIGNETTE}) 100%)` });
+
+  const blobs = Kit.backdrop(kit.layerBg, { color: C.accent, alpha: 0.11, count: 3, blur: 30,
+                                       scale: s, width: 1280, height: 720, duration: D,
+                                       seed: (S.id || "chart") + "-bg" });
+
+  const heading = Kit.el(kit.layerFg, "div", { position: "absolute", left: `${92 * s}px`, top: `${82 * s}px`,
+    fontSize: `${(S.titleSize || 40) * TS * s}px`, fontWeight: "500", color: C.text, opacity: "0" }, S.title || "");
+  const sub = Kit.el(kit.layerFg, "div", { position: "absolute", left: `${94 * s}px`, top: `${138 * s}px`,
+    fontSize: `${17 * s}px`, color: C.dim, opacity: "0" }, S.subtitle || "");
+  const unitTag = Kit.el(kit.layerFg, "div", { position: "absolute", left: `${92 * s}px`, top: `${176 * s}px`,
+    fontSize: `${13 * s}px`, letterSpacing: `${1.4 * s}px`, color: "#5d6b83", opacity: "0" },
+    UNIT ? `单位：${UNIT}` : "");
+  const footer = Kit.el(kit.layerFg, "div", { position: "absolute", left: `${92 * s}px`, bottom: `${26 * s}px`,
+    fontSize: `${12 * s}px`, color: "#5d6b83", opacity: "0" }, S.footer || "");
+  const headingA = scene.actor(heading, { opacity: 0, y: -18 });
+  const subA = scene.actor(sub, { opacity: 0, y: -12 });
+  const unitA = scene.actor(unitTag, { opacity: 0 });
+  const footerA = scene.actor(footer, { opacity: 0 });
+
+  // plot: horizontal ranked bars, so a re-rank is a real movement
+  const plotX = 300 * s, plotW = W() - plotX - 120 * s, rowH = 78 * s, top = 226 * s;
+  const axis = Kit.el(kit.layerMid, "div", { position: "absolute", left: `${plotX}px`, top: `${top - 10 * s}px`,
+    width: `${plotW}px`, height: `${s}px`, background: Kit.rgba(C.text, 0.25), opacity: "0" });
+  scene.actor(axis, { opacity: 0 }).to({ opacity: 1 }, { at: 0.3, dur: 0.6, ease: "out" });
+
+  const tracks = [];
+  for (let g = 0; g <= 4; g++) {
+    const x = plotX + (plotW * g) / 4;
+    const line = Kit.el(kit.layerMid, "div", { position: "absolute", left: `${x}px`, top: `${top - 10 * s}px`,
+      width: `${s}px`, height: `${(SERIES.length) * rowH}px`, background: Kit.rgba(C.text, g ? 0.07 : 0.25), opacity: "0" });
+    scene.actor(line, { opacity: 0 }).to({ opacity: 1 }, { at: 0.25 + g * 0.05, dur: 0.6, ease: "out" });
+    const tick = Kit.el(kit.layerMid, "div", { position: "absolute", left: `${x - 20 * s}px`, top: `${top - 30 * s}px`,
+      width: `${40 * s}px`, textAlign: "center", fontSize: `${12 * s}px`, color: Kit.rgba(C.text, 0.5), opacity: "0" },
+      String(Math.round((MAXV * g) / 4)));
+    scene.actor(tick, { opacity: 0 }).to({ opacity: 1 }, { at: 0.3 + g * 0.05, dur: 0.6, ease: "out" });
+    tracks.push(line);
+  }
+
+  const rows = SERIES.map((d, i) => {
+    const y = top + i * rowH;
+    const label = Kit.el(kit.layerFg, "div", { position: "absolute", left: `${92 * s}px`, top: `${y + 6 * s}px`,
+      width: `${190 * s}px`, fontSize: `${20 * s}px`, color: C.text, textAlign: "right", opacity: "0" }, d.label);
+    const bar = Kit.el(kit.layerMid, "div", { position: "absolute", left: `${plotX}px`, top: `${y}px`,
+      width: `0px`, height: `${52 * s}px`, borderRadius: `${4 * s}px`,
+      background: d.color || C.series[i % C.series.length], opacity: "0" });
+    const val = Kit.el(kit.layerFg, "div", { position: "absolute", left: `${plotX + 8 * s}px`, top: `${y + 6 * s}px`,
+      fontSize: `${16 * s}px`, color: C.text, opacity: "0", fontVariantNumeric: "tabular-nums" }, "0");
+    return {
+      data: d, y0: y,
+      labelA: scene.actor(label, { opacity: 0, x: -24 }),
+      barA: scene.actor(bar, { opacity: 0, width: 0 }),
+      valA: scene.actor(val, { opacity: 0, x: 12 }),
+      node: { label, bar, val }, rank: i
+    };
+  });
+
+  const scan = Kit.el(kit.layerMid, "div", { position: "absolute", left: `${plotX}px`, top: `${top - 10 * s}px`,
+    width: `${2 * s}px`, height: `${SERIES.length * rowH}px`, background: C.accent, opacity: "0",
+    boxShadow: `0 0 ${18 * s}px ${Kit.rgba(C.accent, 0.7)}` });
+  const scanA = scene.actor(scan, { opacity: 0, x: 0 });
+
+  const cam = Kit.makeCamera(M, [{ node: kit.layerBg, depth: DEPTH.bg }, { node: kit.layerGhost, depth: DEPTH.bg * 0.8 },
+                                 { node: kit.layerMid, depth: DEPTH.mid }, { node: kit.layerFg, depth: DEPTH.fg }],
+                             { hits: (CH.beats || []).filter(b => b.kind === "emphasis").map(b => b.t),
+                               shake: SHAKE, duration: D, boost: 1.9 });
+
+  const at = (k) => (CH.beats || []).find(b => b.kind === k);
+  const kinds = (k) => (CH.beats || []).filter(b => b.kind === k);
+  const est = at("establish") || { t: 0 };
+  const widthFor = (v) => Math.max(8 * s, plotW * Math.min(1, v / MAXV));
+
+  headingA.to({ opacity: 1, y: 0 }, { at: est.t + 0.05, dur: 0.6, ease: "out" });
+  subA.to({ opacity: 1, y: 0 }, { at: est.t + 0.2, dur: 0.6, ease: "out" });
+  unitA.to({ opacity: 1 }, { at: est.t + 0.3, dur: 0.5, ease: "out" });
+  footerA.to({ opacity: 0.9 }, { at: est.t + 0.5, dur: 0.6, ease: "out" });
+
+  const valueActors = rows.map(r => new Anim.Actor(document.createElement("div"), { v: 0 }));
+  rows.forEach((r, i) => {
+    const t0 = est.t + 0.35 + i * 0.12;
+    r.labelA.to({ opacity: 1, x: 0 }, { at: t0, dur: 0.5, ease: "out" });
+    r.barA.to({ opacity: 1, width: widthFor(r.data.value) }, { at: t0, dur: 0.9, spring: 0.55, damping: 0.62 });
+    r.valA.to({ opacity: 1, x: 0 }, { at: t0 + 0.15, dur: 0.5, ease: "out" });
+    valueActors[i].to({ v: r.data.value }, { at: t0, dur: 1.1, spring: 0.7, damping: 0.75 });
+  });
+
+  // re-rank on the movement beats: bars trade places, which is the chart's own kind of action
+  kinds("shuffle").concat(kinds("transform")).forEach((b, n) => {
+    const order = rows.map((r, i) => i);
+    const swapA = (n * 2) % Math.max(1, order.length);
+    const swapB = (swapA + 1 + (n % 2)) % Math.max(1, order.length);
+    let a = rows[swapA], c = rows[swapB];
+    const ya = top + a.rank * rowH, yc = top + c.rank * rowH;
+    a.labelA.to({ y: -yc + a.y0 }, { at: b.t, dur: 0.85, ease: "back", arc: 26 });
+    c.labelA.to({ y: -ya + c.y0 }, { at: b.t, dur: 0.85, ease: "back", arc: 26 });
+    a.barA.to({ y: -yc + a.y0 }, { at: b.t, dur: 0.85, ease: "back", arc: 26 });
+    c.barA.to({ y: -ya + c.y0 }, { at: b.t, dur: 0.85, ease: "back", arc: 26 });
+    a.valA.to({ y: -yc + a.y0 }, { at: b.t, dur: 0.85, ease: "back", arc: 26 });
+    c.valA.to({ y: -ya + c.y0 }, { at: b.t, dur: 0.85, ease: "back", arc: 26 });
+    [a, c] = [c, a];
+    rows[swapA] = a; rows[swapB] = c;
+    a.rank = swapA; c.rank = swapB;
+    scanA.to({ opacity: 0.9, x: 0 }, { at: b.t, dur: 0.2 });
+    scanA.to({ x: plotW }, { at: b.t + 0.1, dur: 1.1, ease: "inout" });
+    scanA.to({ opacity: 0 }, { at: b.t + 1.2, dur: 0.3 });
+  });
+
+  // re-scale to a second dataset (or overshoot the current one) on the count beats
+  kinds("count").forEach((b, n) => {
+    rows.forEach((r, i) => {
+      const next = SERIES_ALT && SERIES_ALT[i] ? Number(SERIES_ALT[i].value)
+        : (r.data.alt !== null ? r.data.alt : Math.round(r.data.value * (n % 2 ? 0.72 : 1.28)));
+      r.barA.to({ width: widthFor(next) }, { at: b.t + i * 0.06, dur: 0.9, spring: 0.6, damping: 0.6 });
+      valueActors[i].to({ v: next }, { at: b.t + i * 0.06, dur: 0.9, spring: 0.7, damping: 0.7 });
+      if (!SERIES_ALT && r.data.alt === null) {
+        r.barA.to({ width: widthFor(r.data.value) }, { at: b.t + 1.5, dur: 0.8, ease: "out" });
+        valueActors[i].to({ v: r.data.value }, { at: b.t + 1.5, dur: 0.8, ease: "out" });
+      }
+    });
+  });
+
+  kinds("emphasis").forEach((b, n) => {
+    const leader = rows[0];
+    leader.barA.to({ width: widthFor(leader.data.value) * 1.04 }, { at: b.t, dur: 0.25, ease: "out" });
+    leader.barA.to({ width: widthFor(leader.data.value) }, { at: b.t + 0.3, dur: 0.7, spring: 0.8, damping: 0.45 });
+    rows.forEach((r, i) => r.valA.to({ x: 6 + 4 * (i % 2) }, { at: b.t + i * 0.03, dur: 0.3, ease: "out" }));
+    rows.forEach(r => r.valA.to({ x: 0 }, { at: b.t + 0.4, dur: 0.5, ease: "out" }));
+    scanA.to({ opacity: 1, x: 0 }, { at: b.t, dur: 0.15 });
+    scanA.to({ x: plotW, opacity: 0 }, { at: b.t + 0.15, dur: 0.8, ease: "out" });
+  });
+
+  const ex = at("exit");
+  if (ex) rows.forEach((r, i) => {
+    r.barA.to({ width: widthFor(r.data.value) * 0.985 }, { at: ex.t + i * 0.02, dur: 0.42, ease: "in" });
+  });
+
+  return { s, kit, scene, tex, halo, sweep, vign, cam, particles, rows, valueActors, plotX, plotW, blobs };
 }
 
 L = build();
 window.addEventListener("resize", () => { L = build(); });
 window.__sceneReady = true;
 
-function draw(t, fadeOut) {
-  const s = L.s;
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.clearRect(0, 0, cv.width, cv.height);
-  ctx.setTransform(s, 0, 0, s, 0, 0);
-
-  const x0 = 150, x1 = 1180, y0 = 600, y1 = 250, plotW = x1 - x0, plotH = y0 - y1;
-  const appear = easeOutCubic(clamp01((t - 0.35) / 0.6));
-  ctx.globalAlpha = appear * fadeOut;
-
-  ctx.lineWidth = 1;
-  for (let g = 0; g <= 4; g++) {
-    const y = y0 - (plotH * g) / 4;
-    ctx.strokeStyle = g === 0 ? hexA("#94a3b8", 0.42) : hexA("#94a3b8", 0.14);
-    ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x1, y); ctx.stroke();
-    ctx.fillStyle = hexA("#94a3b8", 0.85);
-    ctx.font = "14px 'Microsoft YaHei UI', sans-serif";
-    ctx.textAlign = "right"; ctx.textBaseline = "middle";
-    ctx.fillText(((MAXV * g) / 4).toFixed(MAXV >= 100 ? 0 : 1), x0 - 14, y);
-  }
-
-  const n = SERIES.length || 1;
-  const slot = plotW / n;
-  const barW = Math.min(96, slot * 0.56);
-  SERIES.forEach((d, i) => {
-    const value = Number(d.value) || 0;
-    const p = easeOutQuint(clamp01((t - (0.75 + i * 0.12)) / 0.7));
-    const h = (plotH * value / MAXV) * p;
-    const cx = x0 + slot * (i + 0.5);
-    const color = d.color || COLORS[i % COLORS.length];
-    ctx.fillStyle = color;
-    ctx.fillRect(cx - barW / 2, y0 - h, barW, h);
-    if (p > 0.02) {
-      ctx.globalAlpha = Math.min(1, p * 1.3) * fadeOut;
-      ctx.fillStyle = COL.text;
-      ctx.font = "600 20px 'Microsoft YaHei UI', sans-serif";
-      ctx.textAlign = "center"; ctx.textBaseline = "bottom";
-      const shown = value >= 100 ? value.toFixed(0) : value.toFixed(1).replace(/\\.0$/, "");
-      ctx.fillText(shown + UNIT, cx, y0 - h - 12);
-      ctx.fillStyle = hexA("#94a3b8", 0.95);
-      ctx.font = "16px 'Microsoft YaHei UI', sans-serif";
-      ctx.textBaseline = "top";
-      ctx.fillText(d.label || "", cx, y0 + 14);
-      ctx.globalAlpha = appear * fadeOut;
-    }
-  });
-  ctx.globalAlpha = 1;
-}
-
 window.seek = (t) => {
-  const fadeOut = 1 - easeOutCubic(clamp01((t - (D - 0.5)) / 0.5));
-  L.heading.style.opacity = (easeOutCubic(clamp01((t - 0.1) / 0.5)) * fadeOut).toFixed(4);
-  L.sub.style.opacity = (easeOutCubic(clamp01((t - 0.35) / 0.5)) * fadeOut).toFixed(4);
-  L.axisUnit.style.opacity = (easeOutCubic(clamp01((t - 0.45) / 0.5)) * fadeOut).toFixed(4);
-  L.footer.style.opacity = (0.9 * easeOutCubic(clamp01((t - 0.8) / 0.5)) * fadeOut).toFixed(4);
-  draw(t, fadeOut);
+  const fadeOut = 1 - Anim.EASE.out(Math.min(1, Math.max(0, (t - (D - 0.45)) / 0.45)));
+  const bump = L.cam.apply(t);
+  L.blobs.forEach(b => b.render(t));
+  L.kit.layerFg.style.opacity = fadeOut.toFixed(4);
+  L.kit.layerMid.style.opacity = fadeOut.toFixed(4);
+  L.kit.flash.style.background = `radial-gradient(120% 120% at 50% 50%, ${Kit.rgba(C.accent, 0.4)}, ${Kit.rgba(C.accent, 0)} 60%)`;
+  L.kit.flash.style.mixBlendMode = "screen";
+  L.kit.flash.style.opacity = (Math.min(0.32, bump * 0.24) * fadeOut).toFixed(4);
+  Kit.ambient(L, t, { fade: fadeOut, textureAmount: TEX_AMOUNT,
+                      pulseAmount: (M.pulse && M.pulse.amount) || 0.01,
+                      pulseFreq: (M.pulse && M.pulse.freq) || 1,
+                      sweepSpeed: (M.sweep && M.sweep.speed) || 340,
+                      sweepOpacity: (M.sweep && M.sweep.opacity) || 0.09 });
+  Kit.drawParticles(L.kit.ctx, L.particles, t, C.text, W(), H());
+
+  // values keep ticking a little so the labels are never perfectly frozen
+  L.rows.forEach((r, i) => {
+    const v = L.valueActors[i].sample(t).v || 0;
+    const wiggle = 1 + 0.002 * Math.sin(t * 5.1 + i);
+    r.node.val.textContent = (v * wiggle).toFixed(DEC) + UNIT;
+    const barW = parseFloat(r.node.bar.style.width || "0") || 0;
+    r.node.val.style.left = `${(L.plotX + 8 * L.s + barW).toFixed(1)}px`;
+  });
 };
 
 window.seek(0);

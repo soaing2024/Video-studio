@@ -3,55 +3,173 @@
 <head>
 <meta charset="utf-8" />
 <style>
-  html, body { margin: 0; padding: 0; overflow: hidden; background: #06080f; }
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #04060c; }
   #stage { position: absolute; inset: 0; }
+  #particles { position: absolute; inset: 0; }
+  .layer { position: absolute; inset: 0; will-change: transform; }
+  .line { display: block; will-change: transform, opacity; }
 </style>
 </head>
 <body>
 <div id="stage"></div>
+<script src="../runtime/anim.js"></script>
+<script src="../runtime/kit.js"></script>
 <script>
-// quote: a statement card. Use it as a breather between busy sections.
+// quote: a statement that keeps being written. Lines arrive one at a time, then drift and re-space;
+// on the swap beat the whole quote is replaced by another. The bar and glyph never stop moving.
 const S = window.SCENE || {};
+const V = S.visual || {};
+const M = S.motion || {};
+const CH = S.choreography || { beats: [{ t: 0, kind: "establish", intensity: 1 }] };
 const D = S.duration || 6;
-const stage = document.getElementById("stage");
-const accent = S.accent || "#e0455f";
-const COL = Object.assign({ bg: "#080c18", text: "#f6f8fc", dim: "#8f9db4" }, S.colors || {});
-const clamp01 = (x) => Math.min(1, Math.max(0, x));
-const easeOutCubic = (x) => 1 - Math.pow(1 - x, 3);
-
-function hexA(hex, a) {
-  const h = hex.replace("#", "");
-  const n = parseInt(h.length === 3 ? h.split("").map(c => c + c).join("") : h, 16);
-  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
-}
+const C = Object.assign({
+  bg: "#080c18", surface: "#111729", border: "#243049", text: "#f6f8fc", dim: "#8f9db4",
+  accent: "#e0455f", accent2: "#38bdf8", accent3: "#a78bfa", series: ["#e0455f"]
+}, V.colors || {});
+const SHAKE = M.shake || { amp: 1.4, decay: 0.3, freq: 13 };
+const DEPTH = M.depth || { bg: 0.3, mid: 0.75, fg: 1.15 };
+const PARTICLES = M.particles || { count: 22, speed: 20, size: 2, opacity: 0.26, vertical: 8, mode: "dust" };
+const TS = V.type_scale || 1;
+const RADIUS = V.radius === undefined ? 10 : V.radius;
+const TEX = V.texture || "none";
+const TEX_AMOUNT = V.texture_amount || 0.1;
+const VIGNETTE = V.vignette || 0.22;
+const QUOTE = S.quote || "";
+const ALT = S.quoteAlt || "";
+const H = () => window.innerHeight, W = () => window.innerWidth;
 
 let L = null;
+
+function chunksOf(text) {
+  const byLine = String(text).split(/\n|。|！|？|；/).map(t => t.trim()).filter(Boolean);
+  if (byLine.length > 1) return byLine.slice(0, 5);
+  const chars = Array.from(String(text));
+  const per = Math.ceil(chars.length / 3);
+  const out = [];
+  for (let i = 0; i < chars.length; i += per) out.push(chars.slice(i, i + per).join(""));
+  return out.slice(0, 5);
+}
+
 function build() {
-  const s = window.innerHeight / 720;
+  const s = H() / 720;
   stage.innerHTML = "";
   stage.style.background =
-    `radial-gradient(${70 * s}% ${70 * s}% at 22% 30%, ${hexA(accent, 0.16)} 0%, ${hexA(accent, 0)} 58%),` +
-    `linear-gradient(150deg, #0d1428 0%, ${COL.bg} 60%, #05070e 100%)`;
-  const mk = (css, text) => {
-    const n = document.createElement("div");
-    Object.assign(n.style, css);
-    if (text !== undefined) n.textContent = text;
-    stage.appendChild(n);
-    return n;
-  };
-  const bar = mk({ position: "absolute", left: `${132 * s}px`, top: `${196 * s}px`, width: `${5 * s}px`,
-    height: "0", background: accent, borderRadius: `${3 * s}px`,
-    boxShadow: `0 0 ${20 * s}px ${hexA(accent, 0.55)}` });
-  const quote = mk({ position: "absolute", left: `${180 * s}px`, right: `${140 * s}px`, top: `${186 * s}px`,
-    fontSize: `${(S.quoteSize || 46) * s}px`, lineHeight: "1.34", color: COL.text, opacity: "0",
-    letterSpacing: `${0.4 * s}px` }, S.quote || "");
-  const author = mk({ position: "absolute", left: `${182 * s}px`, top: `${520 * s}px`, opacity: "0",
-    fontSize: `${20 * s}px`, color: accent }, S.author || "");
-  const source = mk({ position: "absolute", left: `${182 * s}px`, top: `${552 * s}px`, opacity: "0",
-    fontSize: `${14 * s}px`, color: COL.dim }, S.source || "");
-  const footer = mk({ position: "absolute", left: `${182 * s}px`, top: `${650 * s}px`, opacity: "0",
-    fontSize: `${12 * s}px`, letterSpacing: `${1 * s}px`, color: "#5d6b83" }, S.footer || "");
-  return { bar, quote, author, source, footer, s };
+    `radial-gradient(${70 * s}% ${70 * s}% at 22% 30%, ${Kit.rgba(C.accent, 0.15)} 0%, ${Kit.rgba(C.accent, 0)} 58%),` +
+    `linear-gradient(150deg, #0d1428 0%, ${C.bg} 60%, #05070e 100%)`;
+  const kit = Kit.buildStage(stage, {});
+  const scene = new Anim.Scene();
+  const particles = Kit.seedParticles(PARTICLES, S.id || "quote", W(), H());
+
+  const tex = Kit.el(kit.layerBg, "div", Object.assign({ position: "absolute", inset: "0", opacity: "0" },
+                                                       Kit.textureCss(TEX, C.border, TEX_AMOUNT)));
+  const halo = Kit.el(kit.layerBg, "div", { position: "absolute", left: `${140 * s}px`, top: `${120 * s}px`,
+    width: `${700 * s}px`, height: `${700 * s}px`, opacity: "0", pointerEvents: "none",
+    background: `radial-gradient(closest-side, ${Kit.rgba(C.accent, 0.26)}, ${Kit.rgba(C.accent, 0)} 70%)` });
+  const sweep = Kit.el(kit.layerBg, "div", { position: "absolute", top: `${-40 * s}%`, height: `${180 * s}%`,
+    width: `${((M.sweep && M.sweep.width) || 220) * s}px`, opacity: "0", pointerEvents: "none",
+    background: `linear-gradient(90deg, ${Kit.rgba(C.text, 0)}, ${Kit.rgba(C.text, (M.sweep && M.sweep.opacity) || 0.08)}, ${Kit.rgba(C.text, 0)})`,
+    filter: `blur(${22 * s}px)`, transform: `rotate(${(M.sweep && M.sweep.angle) || 0}deg)` });
+  const vign = Kit.el(kit.layerBg, "div", { position: "absolute", inset: "0", opacity: "0", pointerEvents: "none",
+    background: `radial-gradient(78% 78% at 50% 46%, rgba(0,0,0,0) 42%, rgba(0,0,0,${VIGNETTE}) 100%)` });
+
+  const glyph = Kit.el(kit.layerMid, "div", { position: "absolute", left: `${116 * s}px`, top: `${120 * s}px`,
+    fontSize: `${340 * s}px`, lineHeight: "0.8", fontWeight: "700", color: Kit.rgba(C.accent, 0.14),
+    opacity: "0", userSelect: "none" }, "\u201C");
+  const glyphA = scene.actor(glyph, { opacity: 0, scale: 0.7, rot: -8 });
+
+  const bar = Kit.el(kit.layerMid, "div", { position: "absolute", left: `${132 * s}px`, top: `${196 * s}px`,
+    width: `${5 * s}px`, height: `0px`, background: C.accent, borderRadius: `${3 * s}px`,
+    boxShadow: `0 0 ${20 * s}px ${Kit.rgba(C.accent, 0.5)}` });
+  const barA = scene.actor(bar, { opacity: 0, height: 0 });
+
+  const box = Kit.el(kit.layerFg, "div", { position: "absolute", left: `${180 * s}px`, right: `${140 * s}px`,
+    top: `${176 * s}px`, fontSize: `${(S.quoteSize || 44) * TS * s}px`, lineHeight: "1.36", color: C.text });
+  const altBox = ALT ? Kit.el(kit.layerFg, "div", { position: "absolute", left: `${180 * s}px`, right: `${140 * s}px`,
+    top: `${176 * s}px`, fontSize: `${(S.quoteSize || 44) * TS * s}px`, lineHeight: "1.36", color: C.accent,
+    opacity: "0" }) : null;
+
+  const lineActors = chunksOf(QUOTE).map((piece) => {
+    const span = document.createElement("span");
+    span.className = "line";
+    span.textContent = piece;
+    box.appendChild(span);
+    return { actor: scene.actor(span, { opacity: 0, y: 42, blur: 9 }) };
+  });
+  const altActors = altBox ? chunksOf(ALT).map((piece) => {
+    const span = document.createElement("span");
+    span.className = "line";
+    span.textContent = piece;
+    altBox.appendChild(span);
+    return { actor: scene.actor(span, { opacity: 0, y: 34, blur: 7 }) };
+  }) : [];
+
+  const blobs = Kit.backdrop(kit.layerBg, { color: C.accent, alpha: 0.24, count: 4, blur: 10,
+                                       scale: s, width: 1280, height: 720, duration: D,
+                                       seed: (S.id || "quote") + "-bg" });
+
+  const author = Kit.el(kit.layerFg, "div", { position: "absolute", left: `${182 * s}px`, top: `${500 * s}px`,
+    fontSize: `${20 * s}px`, color: C.accent, opacity: "0" }, S.author || "");
+  const source = Kit.el(kit.layerFg, "div", { position: "absolute", left: `${182 * s}px`, top: `${534 * s}px`,
+    fontSize: `${14 * s}px`, color: C.dim, opacity: "0" }, S.source || "");
+  const footer = Kit.el(kit.layerFg, "div", { position: "absolute", left: `${182 * s}px`, bottom: `${28 * s}px`,
+    fontSize: `${12 * s}px`, color: "#5d6b83", opacity: "0" }, S.footer || "");
+  const authorA = scene.actor(author, { opacity: 0, x: -24 });
+  const sourceA = scene.actor(source, { opacity: 0, x: -24 });
+  const footerA = scene.actor(footer, { opacity: 0 });
+
+  const cam = Kit.makeCamera(M, [{ node: kit.layerBg, depth: DEPTH.bg }, { node: kit.layerGhost, depth: DEPTH.bg * 0.8 },
+                                 { node: kit.layerMid, depth: DEPTH.mid }, { node: kit.layerFg, depth: DEPTH.fg }],
+                             { hits: (CH.beats || []).filter(b => b.kind === "emphasis").map(b => b.t),
+                               shake: SHAKE, duration: D, boost: 1.9 });
+
+  const at = (k) => (CH.beats || []).find(b => b.kind === k);
+  const kinds = (k) => (CH.beats || []).filter(b => b.kind === k);
+  const est = at("establish") || { t: 0 };
+
+  glyphA.to({ opacity: 1, scale: 1, rot: 0 }, { at: est.t + 0.05, dur: 1.0, ease: "out", arc: 26 });
+  barA.to({ opacity: 1, height: 300 * s * 0.62 }, { at: est.t + 0.2, dur: 0.9, ease: "out" });
+  lineActors.forEach((ln, i) => ln.actor.to({ opacity: 1, y: 0, blur: 0 },
+      { at: est.t + 0.35 + i * 0.26, dur: 0.7, spring: 0.5, damping: 0.66, arc: i % 2 ? 12 : -12, anticipation: 0.15 }));
+  authorA.to({ opacity: 1, x: 0 }, { at: est.t + 0.6 + lineActors.length * 0.26, dur: 0.6, ease: "out" });
+  sourceA.to({ opacity: 1, x: 0 }, { at: est.t + 0.8 + lineActors.length * 0.26, dur: 0.6, ease: "out" });
+  footerA.to({ opacity: 0.85 }, { at: est.t + 1.1, dur: 0.6 });
+
+  kinds("emphasis").forEach((b, i) => {
+    const I = b.intensity || 1;
+    glyphA.to({ scale: 1 + 0.12 * I, rot: (i % 2 ? 4 : -4) }, { at: b.t, dur: 0.5, spring: 0.7, damping: 0.45 });
+    barA.to({ height: 300 * s * (0.62 + 0.16 * I) }, { at: b.t, dur: 0.45, spring: 0.8, damping: 0.4 });
+    lineActors.forEach((ln, k) => ln.actor.to({ x: (i % 2 ? 8 : -8) }, { at: b.t + k * 0.04, dur: 0.4, ease: "out" }));
+    lineActors.forEach(ln => ln.actor.to({ x: 0 }, { at: b.t + 0.5, dur: 0.5, ease: "out" }));
+  });
+
+  kinds("transform").forEach((b) => {
+    barA.to({ height: 300 * s * 0.45 }, { at: b.t, dur: 1.2, ease: "inout" });
+    lineActors.forEach((ln, k) => ln.actor.to({ x: k % 2 ? 12 : -12, y: k % 2 ? -4 : 4 },
+      { at: b.t + k * 0.05, dur: 0.9, ease: "inout" }));
+    lineActors.forEach(ln => ln.actor.to({ x: 0, y: 0 }, { at: b.t + 1.2, dur: 0.7, ease: "out" }));
+  });
+
+  kinds("swap").forEach((b) => {
+    if (!altActors.length) return;
+    lineActors.forEach((ln, i) => ln.actor.to({ opacity: 0, y: -34, blur: 7 },
+      { at: b.t + i * 0.04, dur: 0.28, ease: "in" }));
+    altActors.forEach((ln, i) => ln.actor.to({ opacity: 1, y: 0, blur: 0 },
+      { at: b.t + 0.2 + i * 0.16, dur: 0.7, spring: 0.55, damping: 0.62, arc: -12 }));
+    barA.to({ height: 300 * s * 0.62 }, { at: b.t, dur: 0.6, ease: "back" });
+  });
+
+  kinds("reveal").forEach(b => {
+    glyphA.to({ opacity: 0.4 }, { at: b.t, dur: 0.25, ease: "in" });
+    glyphA.to({ opacity: 1 }, { at: b.t + 0.25, dur: 0.5, ease: "out" });
+  });
+
+  const ex = at("exit");
+  if (ex) {
+    barA.to({ height: 300 * s * 0.5 }, { at: ex.t, dur: 0.42, ease: "in" });
+    lineActors.forEach(ln => ln.actor.to({ y: -8 }, { at: ex.t, dur: 0.42, ease: "in" }));
+  }
+
+  return { s, kit, scene, tex, halo, sweep, vign, cam, particles, barA, glyphA, blobs };
 }
 
 L = build();
@@ -59,14 +177,21 @@ window.addEventListener("resize", () => { L = build(); });
 window.__sceneReady = true;
 
 window.seek = (t) => {
-  const fadeOut = 1 - easeOutCubic(clamp01((t - (D - 0.5)) / 0.5));
-  const p = clamp01((t - 0.3) / 0.8);
-  L.bar.style.height = `${(300 * L.s * easeOutCubic(p)).toFixed(2)}px`;
-  L.quote.style.opacity = (easeOutCubic(clamp01((t - 0.5) / 0.7)) * fadeOut).toFixed(4);
-  L.quote.style.transform = `translateY(${((1 - easeOutCubic(clamp01((t - 0.5) / 0.7))) * 22 * L.s).toFixed(2)}px)`;
-  L.author.style.opacity = (easeOutCubic(clamp01((t - 1.15) / 0.5)) * fadeOut).toFixed(4);
-  L.source.style.opacity = (easeOutCubic(clamp01((t - 1.3) / 0.5)) * fadeOut).toFixed(4);
-  L.footer.style.opacity = (0.9 * easeOutCubic(clamp01((t - 1.5) / 0.5)) * fadeOut).toFixed(4);
+  const fadeOut = 1 - Anim.EASE.out(Math.min(1, Math.max(0, (t - (D - 0.4)) / 0.4)));
+  const bump = L.cam.apply(t);
+  L.blobs.forEach(b => b.render(t));
+  L.kit.layerFg.style.opacity = fadeOut.toFixed(4);
+  L.kit.layerMid.style.opacity = fadeOut.toFixed(4);
+  L.kit.flash.style.background = `radial-gradient(120% 120% at 50% 50%, ${Kit.rgba(C.accent, 0.4)}, ${Kit.rgba(C.accent, 0)} 60%)`;
+  L.kit.flash.style.mixBlendMode = "screen";
+  L.kit.flash.style.opacity = (Math.min(0.35, bump * 0.26) * fadeOut).toFixed(4);
+  Kit.ambient(L, t, { fade: fadeOut, textureAmount: TEX_AMOUNT,
+                      pulseAmount: (M.pulse && M.pulse.amount) || 0.012,
+                      pulseFreq: (M.pulse && M.pulse.freq) || 1,
+                      sweepSpeed: (M.sweep && M.sweep.speed) || 340,
+                      sweepOpacity: (M.sweep && M.sweep.opacity) || 0.08 });
+
+  Kit.drawParticles(L.kit.ctx, L.particles, t, C.text, W(), H());
 };
 
 window.seek(0);

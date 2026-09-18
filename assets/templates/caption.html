@@ -19,6 +19,7 @@
   <div class="layer" id="flash"></div>
 </div>
 <script src="../runtime/anim.js"></script>
+<script src="../runtime/kit.js"></script>
 <script>
 // caption: the explainer workhorse, built on the same beat-sheet runtime as kinetic. The panel
 // keeps travelling, the headline swaps mid-shot, bullets transform, and the narration band
@@ -138,6 +139,10 @@ function build() {
     background: PANEL === "full-bleed"
       ? "linear-gradient(90deg, rgba(4,6,12,0.92) 0%, rgba(4,6,12,0.55) 45%, rgba(4,6,12,0.2) 100%)"
       : `linear-gradient(${onLeft ? 270 : 90}deg, ${rgba(C.bg, 0.85)} 0%, ${rgba(C.bg, 0)} 45%)` });
+  const blobs = Kit.backdrop(layerBg, { color: C.accent, alpha: 0.10, count: 3, blur: 26, scale: s,
+                                     width: 1280, height: 720, duration: D,
+                                     seed: (S.id || "caption") + "-bg" });
+
   const panelA = scene.actor(panel, { opacity: 0, scale: 1.06, y: 30, clip: 0 });
   const scrimA = scene.actor(scrim, { opacity: 0 });
 
@@ -287,7 +292,7 @@ function build() {
   }
 
   return { s, scene, tex, halo, sweep, vign, panel, plate: panel, camActor, camLayers, camHits,
-           chipA, band, bandText };
+chipA, band, bandText, blobs };
 }
 
 L = build();
@@ -313,6 +318,7 @@ window.seek = (t) => {
     L.panel.style.backgroundImage = `url("${img.src}")`;
   }
 
+  if (L.blobs) L.blobs.forEach(b => b.render(t));
   const cam = L.camActor.sample(t);
   let bump = 0;
   for (const h of L.camHits) {

@@ -3,64 +3,153 @@
 <head>
 <meta charset="utf-8" />
 <style>
-  html, body { margin: 0; padding: 0; overflow: hidden; background: #05070d; }
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #04060c; }
   #stage { position: absolute; inset: 0; }
-  .mono { font-family: Consolas, "Cascadia Mono", Menlo, monospace; }
+  #particles { position: absolute; inset: 0; }
+  .layer { position: absolute; inset: 0; will-change: transform; }
 </style>
 </head>
 <body>
 <div id="stage"></div>
+<script src="../runtime/anim.js"></script>
+<script src="../runtime/kit.js"></script>
 <script>
-// terminal: a window that types itself. For technical explainers and code demos.
+// terminal: typing is inherently continuous, so the work here is keeping the session alive - the
+// window drifts, past output scrolls, and each beat prints something new or punches the frame.
 const S = window.SCENE || {};
+const V = S.visual || {};
+const M = S.motion || {};
+const CH = S.choreography || { beats: [{ t: 0, kind: "establish", intensity: 1 }] };
 const D = S.duration || 8;
-const stage = document.getElementById("stage");
-const accent = S.accent || "#4ade80";
-const COL = Object.assign({ bg: "#0a0f1a", panel: "#0d1420", text: "#dbe6f5", dim: "#5d6b83",
-  prompt: "#38bdf8", ok: "#4ade80", warn: "#fbbf24" }, S.colors || {});
-const clamp01 = (x) => Math.min(1, Math.max(0, x));
-const easeOutCubic = (x) => 1 - Math.pow(1 - x, 3);
+const C = Object.assign({
+  bg: "#0a0f1a", surface: "#0d1420", border: "#22304a", text: "#dbe6f5", dim: "#5d6b83",
+  accent: "#4ade80", accent2: "#38bdf8", accent3: "#fbbf24", series: ["#4ade80"]
+}, V.colors || {});
+const SHAKE = M.shake || { amp: 1.8, decay: 0.28, freq: 15 };
+const DEPTH = M.depth || { bg: 0.3, mid: 0.75, fg: 1.15 };
+const PARTICLES = M.particles || { count: 18, speed: 18, size: 1.8, opacity: 0.22, vertical: 6, mode: "streak" };
+const TS = V.type_scale || 1;
+const RADIUS = V.radius === undefined ? 8 : V.radius;
+const TEX = V.texture || "none";
+const TEX_AMOUNT = V.texture_amount || 0.1;
+const VIGNETTE = V.vignette || 0.3;
 
-function hexA(hex, a) {
-  const h = hex.replace("#", "");
-  const n = parseInt(h.length === 3 ? h.split("").map(c => c + c).join("") : h, 16);
-  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
-}
-
-const LINES = (S.lines || []).map((l) => (typeof l === "string" ? { text: l, kind: "cmd" } : l));
+const LINES = (S.lines || []).map(l => (typeof l === "string" ? { text: l, kind: "cmd" } : l));
+const CPS = Number(S.charsPerSecond || 30);
+const PROMPT = S.prompt || "$";
+const H = () => window.innerHeight, W = () => window.innerWidth;
 
 let L = null;
+
 function build() {
-  const s = window.innerHeight / 720;
+  const s = H() / 720;
   stage.innerHTML = "";
-  stage.style.background = `linear-gradient(160deg, #0b1120 0%, #05070d 70%)`;
-  const mk = (css, text) => {
-    const n = document.createElement("div");
-    Object.assign(n.style, css);
-    if (text !== undefined) n.textContent = text;
-    stage.appendChild(n);
-    return n;
-  };
-  const win = mk({ position: "absolute", left: `${96 * s}px`, top: `${96 * s}px`,
-    width: `${1088 * s}px`, height: `${528 * s}px`, background: hexA(COL.panel, 0.92),
-    borderRadius: `${10 * s}px`, border: `${1 * s}px solid ${hexA("#94a3b8", 0.18)}`,
-    overflow: "hidden", opacity: "0" });
-  mk({ position: "absolute", left: `${20 * s}px`, top: `${16 * s}px`, width: `${11 * s}px`,
-    height: `${11 * s}px`, borderRadius: "50%", background: "#ff5f57" });
-  mk({ position: "absolute", left: `${39 * s}px`, top: `${16 * s}px`, width: `${11 * s}px`,
-    height: `${11 * s}px`, borderRadius: "50%", background: "#febc2e" });
-  mk({ position: "absolute", left: `${58 * s}px`, top: `${16 * s}px`, width: `${11 * s}px`,
-    height: `${11 * s}px`, borderRadius: "50%", background: "#28c840" });
-  mk({ position: "absolute", left: `${88 * s}px`, right: "0", top: `${15 * s}px`,
-    fontSize: `${13 * s}px`, color: COL.dim }, S.windowTitle || "terminal");
-  const body = mk({ position: "absolute", left: `${26 * s}px`, right: `${26 * s}px`, top: `${52 * s}px`,
-    fontSize: `${(S.fontSize || 19) * s}px`, lineHeight: `${30 * s}px`, color: COL.text,
-    whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "Consolas, 'Cascadia Mono', monospace" });
-  const footer = mk({ position: "absolute", left: `${96 * s}px`, top: `${648 * s}px`, opacity: "0",
-    fontSize: `${12 * s}px`, letterSpacing: `${1 * s}px`, color: "#5d6b83" }, S.footer || "");
-  const title = mk({ position: "absolute", right: `${96 * s}px`, top: `${648 * s}px`, opacity: "0",
-    fontSize: `${12 * s}px`, color: accent }, S.title || "");
-  return { win, body, footer, title, s };
+  stage.style.background = "linear-gradient(160deg, #0b1120 0%, #05070d 70%)";
+  const kit = Kit.buildStage(stage, {});
+  const scene = new Anim.Scene();
+  const particles = Kit.seedParticles(PARTICLES, S.id || "terminal", W(), H());
+
+  const tex = Kit.el(kit.layerBg, "div", Object.assign({ position: "absolute", inset: "0", opacity: "0" },
+                                                       Kit.textureCss(TEX, C.border, TEX_AMOUNT)));
+  const halo = Kit.el(kit.layerBg, "div", { position: "absolute", left: `${80 * s}px`, top: `${60 * s}px`,
+    width: `${900 * s}px`, height: `${700 * s}px`, opacity: "0", pointerEvents: "none",
+    background: `radial-gradient(closest-side, ${Kit.rgba(C.accent, 0.16)}, ${Kit.rgba(C.accent, 0)} 70%)` });
+  const sweep = Kit.el(kit.layerBg, "div", { position: "absolute", top: `${-40 * s}%`, height: `${180 * s}%`,
+    width: `${((M.sweep && M.sweep.width) || 240) * s}px`, opacity: "0", pointerEvents: "none",
+    background: `linear-gradient(90deg, ${Kit.rgba(C.text, 0)}, ${Kit.rgba(C.text, (M.sweep && M.sweep.opacity) || 0.08)}, ${Kit.rgba(C.text, 0)})`,
+    filter: `blur(${24 * s}px)`, transform: `rotate(${(M.sweep && M.sweep.angle) || 0}deg)` });
+  const vign = Kit.el(kit.layerBg, "div", { position: "absolute", inset: "0", opacity: "0", pointerEvents: "none",
+    background: `radial-gradient(80% 80% at 50% 46%, rgba(0,0,0,0) 40%, rgba(0,0,0,${VIGNETTE}) 100%)` });
+
+  const blobs = Kit.backdrop(kit.layerBg, { color: C.accent2, alpha: 0.11, count: 3, blur: 30,
+                                       scale: s, width: 1280, height: 720, duration: D,
+                                       seed: (S.id || "terminal") + "-bg" });
+
+  const win = Kit.el(kit.layerMid, "div", { position: "absolute", left: `${70 * s}px`, top: `${78 * s}px`,
+    width: `${W() - 140 * s}px`, height: `${H() - 186 * s}px`, background: Kit.rgba(C.surface, 0.94),
+    borderRadius: `${RADIUS * s}px`, border: `${s}px solid ${Kit.rgba(C.border, 0.8)}`,
+    overflow: "hidden", opacity: "0", boxShadow: `0 ${20 * s}px ${60 * s}px rgba(0,0,0,0.5)` });
+  const winA = scene.actor(win, { opacity: 0, scale: 0.94, y: 30 });
+
+  const dots = ["#ff5f57", "#febc2e", "#28c840"].map((col, i) =>
+    Kit.el(win, "div", { position: "absolute", left: `${20 + i * 19 * s}px`, top: `${16 * s}px`,
+      width: `${11 * s}px`, height: `${11 * s}px`, borderRadius: "50%", background: col }));
+  const titleBar = Kit.el(win, "div", { position: "absolute", left: `${88 * s}px`, top: `${15 * s}px`,
+    fontSize: `${13 * s}px`, color: C.dim }, S.windowTitle || "terminal");
+  const body = Kit.el(win, "div", { position: "absolute", left: `${26 * s}px`, right: `${26 * s}px`,
+    top: `${52 * s}px`, bottom: `${40 * s}px`, fontSize: `${(S.fontSize || 25) * TS * s}px`,
+    lineHeight: `${30 * s}px`, color: C.text, fontFamily: "Consolas, 'Cascadia Mono', monospace",
+    whiteSpace: "pre-wrap", overflow: "hidden" });
+  const progress = Kit.el(win, "div", { position: "absolute", left: `${26 * s}px`, right: `${26 * s}px`,
+    bottom: `${16 * s}px`, height: `${4 * s}px`, background: Kit.rgba(C.border, 0.6),
+    borderRadius: `${2 * s}px`, overflow: "hidden", opacity: "0" });
+  const progressFill = Kit.el(progress, "div", { height: "100%", width: "0px", background: C.accent });
+  const progressA = scene.actor(progress, { opacity: 0 });
+  const progressFillA = scene.actor(progressFill, { width: 0 });
+
+  // a CRT refresh band crossing the window: constant, large-area, high-contrast motion
+  const crt = Kit.el(win, "div", { position: "absolute", left: "0px", right: "0px", height: `${60 * s}px`,
+    top: "0px", opacity: "0.55", pointerEvents: "none",
+    background: `linear-gradient(180deg, ${Kit.rgba(C.accent2, 0)}, ${Kit.rgba(C.accent2, 0.18)}, ${Kit.rgba(C.accent2, 0)})` });
+
+  const title = Kit.el(kit.layerFg, "div", { position: "absolute", right: `${96 * s}px`, bottom: `${26 * s}px`,
+    fontSize: `${13 * s}px`, color: C.accent, opacity: "0" }, S.title || "");
+  const footer = Kit.el(kit.layerFg, "div", { position: "absolute", left: `${96 * s}px`, bottom: `${26 * s}px`,
+    fontSize: `${13 * s}px`, color: "#5d6b83", opacity: "0" }, S.footer || "");
+  const titleA = scene.actor(title, { opacity: 0, x: 14 });
+  const footerA = scene.actor(footer, { opacity: 0, x: -14 });
+
+  // cursor: an actor so it blinks and can be punched on a beat
+  const cursor = Kit.el(body, "span", { display: "inline-block", width: `${11 * s}px`, height: `${22 * s}px`,
+    background: C.accent, verticalAlign: "-3px", opacity: "1" });
+  const cursorA = scene.actor(cursor, { opacity: 1, scale: 1 });
+
+  const cam = Kit.makeCamera(M, [{ node: kit.layerBg, depth: DEPTH.bg }, { node: kit.layerGhost, depth: DEPTH.bg * 0.8 },
+                                 { node: kit.layerMid, depth: DEPTH.mid }, { node: kit.layerFg, depth: DEPTH.fg }],
+                             { hits: (CH.beats || []).filter(b => b.kind === "emphasis").map(b => b.t),
+                               shake: SHAKE, duration: D, boost: 1.9 });
+
+  const at = (k) => (CH.beats || []).find(b => b.kind === k);
+  const kinds = (k) => (CH.beats || []).filter(b => b.kind === k);
+  const est = at("establish") || { t: 0 };
+
+  winA.to({ opacity: 1, scale: 1, y: 0 }, { at: est.t, dur: 0.9, ease: "out", arc: 20 });
+  dots.forEach((d, i) => scene.actor(d, { opacity: 1, scale: 0.4 }).to({ scale: 1 },
+      { at: est.t + 0.4 + i * 0.08, dur: 0.4, spring: 0.9, damping: 0.45 }));
+  footerA.to({ opacity: 0.9, x: 0 }, { at: est.t + 0.7, dur: 0.6 });
+  titleA.to({ opacity: 0.95, x: 0 }, { at: est.t + 0.85, dur: 0.6 });
+  cursorA.to({ opacity: 1 }, { at: est.t + 0.3, dur: 0.3 });
+
+  // each build beat prints a fresh line; emphasis beats punch the frame and flash
+  kinds("build").forEach((b, n) => {
+    cursorA.to({ scale: 1.6 }, { at: b.t, dur: 0.25, spring: 0.9, damping: 0.4 });
+    cursorA.to({ scale: 1 }, { at: b.t + 0.3, dur: 0.4, ease: "out" });
+    progressA.to({ opacity: 1 }, { at: b.t, dur: 0.4 });
+    progressFillA.to({ width: (W() - 140 * s) - 52 * s * (0.25 + 0.22 * n) }, { at: b.t, dur: 0.9, spring: 0.6, damping: 0.7 });
+  });
+  kinds("emphasis").forEach((b) => {
+    winA.to({ scale: 1.015 }, { at: b.t, dur: 0.2, ease: "out" });
+    winA.to({ scale: 1 }, { at: b.t + 0.25, dur: 0.6, spring: 0.8, damping: 0.4 });
+    cursorA.to({ opacity: 0.2 }, { at: b.t, dur: 0.06 });
+    progressFillA.to({ width: (W() - 140 * s) - 52 * s }, { at: b.t, dur: 0.7, ease: "back" });
+  });
+  const bodyA = scene.actor(body, { y: 0 });
+  kinds("transform").forEach((b) => {
+    // the session scrolls: the body lifts so older lines slide out of view, then settles back
+    bodyA.to({ y: -34 * s }, { at: b.t, dur: 0.8, ease: "inout", arc: 12 });
+    bodyA.to({ y: 0 }, { at: b.t + 1.6, dur: 0.8, ease: "out" });
+  });
+  kinds("parallax_drift").forEach((b, n) => {
+    winA.to({ x: (n % 2 ? -26 : 26), rot: (n % 2 ? 0.8 : -0.8) }, { at: b.t, dur: 1.6, ease: "inout", arc: 22 });
+  });
+  const ex = at("exit");
+  if (ex) {
+    winA.to({ scale: 0.99, y: 8 }, { at: ex.t, dur: 0.42, ease: "in" });
+    cursorA.to({ opacity: 0.4 }, { at: ex.t, dur: 0.3 });
+  }
+
+  return { s, kit, scene, tex, halo, sweep, vign, cam, particles, body, cursorA, progressFillA,
+           progressA, winA, blobs, crt };
 }
 
 L = build();
@@ -68,35 +157,53 @@ window.addEventListener("resize", () => { L = build(); });
 window.__sceneReady = true;
 
 function typed(t) {
-  // deterministic typing: characters appear at a constant rate, line by line
-  const cps = Number(S.charsPerSecond || 26);
-  let budget = Math.max(0, (t - 0.45)) * cps;
+  // characters appear at a steady rate; each line also waits for its own beat when beats exist
+  const marks = (CH.beats || []).filter(b => b.kind === "build" || b.kind === "emphasis").map(b => b.t);
+  let budget = Math.max(0, t - 0.5) * CPS;
   const out = [];
-  for (const line of LINES) {
+  for (let i = 0; i < LINES.length; i++) {
+    const line = LINES[i];
     const text = line.text || "";
     if (budget <= 0) break;
+    const gate = marks[i];
+    if (gate !== undefined && t < gate && i > 0) break;
     const take = Math.min(text.length, Math.floor(budget));
     out.push({ line, shown: text.slice(0, take), done: take >= text.length });
-    budget -= take + Number(line.pause ?? 6);
+    budget -= take + Number(line.pause === undefined ? 6 : line.pause);
   }
   return out;
 }
 
 window.seek = (t) => {
-  const fadeOut = 1 - easeOutCubic(clamp01((t - (D - 0.5)) / 0.5));
-  L.win.style.opacity = (easeOutCubic(clamp01(t / 0.4)) * fadeOut).toFixed(4);
-  L.win.style.transform = `translateY(${((1 - easeOutCubic(clamp01(t / 0.5))) * 16 * L.s).toFixed(2)}px)`;
+  const fadeOut = 1 - Anim.EASE.out(Math.min(1, Math.max(0, (t - (D - 0.4)) / 0.4)));
+  const bump = L.cam.apply(t);
+  L.blobs.forEach(b => b.render(t));
+  L.kit.layerFg.style.opacity = fadeOut.toFixed(4);
+  L.kit.layerMid.style.opacity = fadeOut.toFixed(4);
+  L.kit.flash.style.background = `radial-gradient(120% 120% at 50% 50%, ${Kit.rgba(C.accent, 0.42)}, ${Kit.rgba(C.accent, 0)} 60%)`;
+  L.kit.flash.style.mixBlendMode = "screen";
+  L.kit.flash.style.opacity = (Math.min(0.4, bump * 0.3) * fadeOut).toFixed(4);
+  Kit.ambient(L, t, { fade: fadeOut, textureAmount: TEX_AMOUNT,
+                      pulseAmount: (M.pulse && M.pulse.amount) || 0.01,
+                      pulseFreq: (M.pulse && M.pulse.freq) || 1,
+                      sweepSpeed: (M.sweep && M.sweep.speed) || 320,
+                      sweepOpacity: (M.sweep && M.sweep.opacity) || 0.08 });
+  Kit.drawParticles(L.kit.ctx, L.particles, t, C.text, W(), H());
+
   const rows = typed(t);
-  const parts = rows.map(({ line, shown, done }) => {
-    const color = line.kind === "out" ? COL.dim : line.kind === "ok" ? COL.ok :
-      line.kind === "warn" ? COL.warn : COL.text;
-    const head = line.kind === "cmd" ? `<span style="color:${COL.prompt}">${S.prompt || "$"} </span>` : "";
-    const caret = done ? "" : `<span style="opacity:${(Math.floor(t * 3) % 2 ? 0.15 : 1)}">&#9612;</span>`;
+  const html = rows.map(({ line, shown, done }) => {
+    const color = line.kind === "out" ? C.dim : line.kind === "ok" ? C.accent :
+      line.kind === "warn" ? C.accent3 : C.text;
+    const head = line.kind === "cmd" ? `<span style="color:${C.accent2}">${PROMPT} </span>` : "";
+    const caret = done ? "" : "";
     return `<div style="color:${color}">${head}${shown}${caret}</div>`;
-  });
-  L.body.innerHTML = parts.join("");
-  L.footer.style.opacity = (0.9 * easeOutCubic(clamp01((t - 0.7) / 0.5)) * fadeOut).toFixed(4);
-  L.title.style.opacity = (0.9 * easeOutCubic(clamp01((t - 0.8) / 0.5)) * fadeOut).toFixed(4);
+  }).join("");
+  const crtSpan = Math.max(1, Math.round(H() - 186 * L.s));
+  L.crt.style.top = `${Math.round(((t * 330) % (crtSpan + 120 * L.s)) - 60 * L.s)}px`;
+
+  L.body.innerHTML = html;
+  L.body.appendChild(L.cursorA.node);   // one persistent caret, always after the last line
+  L.cursorA.node.style.opacity = (Math.floor(t * 3) % 2 ? 0.15 : 1) * fadeOut;
 };
 
 window.seek(0);
