@@ -29,10 +29,20 @@ def work_size(spec: dict) -> tuple[int, int, int]:
     return spec["video"]["width"], spec["video"]["height"], 1
 
 
-def template_path(name: str) -> Path:
+def template_path(name: str, base_dir=None) -> Path:
+    """Resolve a segment template to a file.
+
+    A `.html` value is a project file, so a relative one resolves next to the project spec -
+    the same rule assets follow. Anything else is a built-in template name. `base_dir` is only
+    a fallback for callers that did not go through spec.normalize (which already resolves).
+    """
     p = Path(name)
-    if p.suffix == ".html":
-        return p if p.is_absolute() else (Path.cwd() / p)
+    if p.suffix.lower() == ".html":
+        if p.is_absolute():
+            return p
+        return (Path(base_dir) if base_dir else Path.cwd()) / p
+    if p.is_absolute() or len(p.parts) > 1:
+        return p            # a path without the .html suffix, e.g. templates/my-card
     return TEMPLATES / f"{name}.html"
 
 
@@ -46,18 +56,48 @@ def segment_path(spec: dict, sid: str) -> Path:
     return build_dir(spec) / "segments" / f"{sid}.mp4"
 
 
+def scene_globals(spec: dict) -> dict:
+    """Spec-level values injected into every scene payload.
+
+    Whatever reaches a template must also reach the cache key: a change the key cannot see is
+    served from cache as a stale clip. Keep this in step with prepare_assets().
+    """
+    look = spec.get("look") or {}
+    return {"accent": look.get("accent", "#e0455f")}
+
+
+def last_report(stdout: str) -> dict:
+    """The JSON report render_segment.mjs prints on its last line (empty dict if absent).
+
+    Callers use it to see page errors on the paths that still exit 0, e.g. a still preview.
+    """
+    for line in reversed((stdout or "").splitlines()):
+        line = line.strip()
+        if line.startswith("{") and line.endswith("}"):
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                continue
+    return {}
+
+
 def _key(spec: dict, seg: dict, w: int, h: int) -> str:
     hsh = hashlib.sha256()
-    tpl = template_path(seg["template"])
+    tpl = template_path(seg["template"], spec.get("base_dir"))
     hsh.update(tpl.read_bytes() if tpl.is_file() else b"missing-template")
     hsh.update(json.dumps(seg.get("data", {}), sort_keys=True, ensure_ascii=False).encode())
+    hsh.update(json.dumps(scene_globals(spec), sort_keys=True, ensure_ascii=False).encode())
     for name, value in sorted(seg.get("assets", {}).items()):
         hsh.update(f"{name}:{value}:".encode())
         p = Path(str(value))
         if p.is_file():
             st = p.stat()
             hsh.update(f"{st.st_size}:{int(st.st_mtime)}".encode())
-    hsh.update(f"{w}x{h}@{spec['video']['fps']}:{float(seg['duration'])}".encode())
+    crf = float((spec.get("render") or {}).get("crf", 12))
+    # id and template name reach the scene as well (a template seeds itself on S.id), and two
+    # different missing templates must not end up sharing one cached clip.
+    hsh.update(f"{seg.get('id', '')}|{seg.get('template', '')}|"
+               f"{w}x{h}@{spec['video']['fps']}:{float(seg['duration'])}:crf{crf}".encode())
     return hsh.hexdigest()[:16]
 
 
@@ -93,7 +133,8 @@ def prepare_assets(spec: dict, seg: dict, log=print) -> dict:
     payload["assets"] = {k: _file_url(v) for k, v in assets.items()}
     payload["duration"] = float(seg["duration"])
     payload["id"] = seg["id"]
-    payload.setdefault("accent", (spec.get("look") or {}).get("accent", "#e0455f"))
+    for key, value in scene_globals(spec).items():
+        payload.setdefault(key, value)      # segment data may still override a global
     return payload
 
 
@@ -111,7 +152,7 @@ def render_segment(spec: dict, seg: dict, ffmpeg: str, node: str, force: bool = 
     if not force and out.is_file() and keyfile.is_file() and keyfile.read_text().strip() == key:
         return {"segment": seg["id"], "path": str(out), "cached": True}
 
-    tpl = template_path(seg["template"])
+    tpl = template_path(seg["template"], spec.get("base_dir"))
     if not tpl.is_file():
         raise FileNotFoundError(f"template not found for segment '{seg['id']}': {tpl}")
 
@@ -143,7 +184,7 @@ def render_segment(spec: dict, seg: dict, ffmpeg: str, node: str, force: bool = 
 def _render_still_segment(spec: dict, seg: dict, ffmpeg: str, node: str, out: Path,
                           keyfile: Path, key: str, log=print) -> dict:
     w, h, _ = work_size(spec)
-    tpl = template_path(seg["template"])
+    tpl = template_path(seg["template"], spec.get("base_dir"))
     payload = prepare_assets(spec, seg)
     data_file = out.with_suffix(".scene.json")
     data_file.parent.mkdir(parents=True, exist_ok=True)

@@ -313,13 +313,23 @@ def cmd_preview(args) -> int:
     data_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     w, h, _ = render.work_size(spec)
     cmd = [runtime.find_node(), str(HERE / "render_segment.mjs"),
-           "--scene", str(render.template_path(seg["template"])), "--out", str(out.with_suffix(".mp4")),
+           "--scene", str(render.template_path(seg["template"], spec.get("base_dir"))),
+           "--out", str(out.with_suffix(".mp4")),
            "--data", str(data_file), "--fps", str(spec["video"]["fps"]),
            "--duration", str(seg["duration"]), "--width", str(w), "--height", str(h),
            "--still", str(args.at), "--still-out", str(out)]
     import subprocess
     proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
                           env=render.runtime_env())
+    # A page error does not stop the renderer, so a template that throws still writes a frame -
+    # which would otherwise come back as a clean-looking (white) preview.
+    report = render.last_report(proc.stdout)
+    if report.get("errors"):
+        for message in report["errors"]:
+            print(f"template error in '{seg['id']}': {message}", file=sys.stderr)
+        print(f"a frame was still written to {out}, but it is not a valid preview",
+              file=sys.stderr)
+        return 1
     if proc.returncode != 0:
         print(proc.stdout + proc.stderr, file=sys.stderr)
         return 1

@@ -54,8 +54,10 @@ if (a.still) {
   fs.mkdirSync(path.dirname(path.resolve(a["still-out"] || "still.png")), { recursive: true });
   fs.writeFileSync(a["still-out"] || "still.png", buf);
   await browser.close();
-  console.log(JSON.stringify({ ok: true, still: a["still-out"] || "still.png", errors }));
-  process.exit(0);
+console.log(JSON.stringify({ ok: true, still: a["still-out"] || "still.png", errors }));
+// A still is only a preview if the page actually ran: report page errors the same way the
+// frame path does, so a template that throws cannot pass as a white frame.
+process.exit(errors.length === 0 ? 0 : 1);
 }
 
 fs.mkdirSync(path.dirname(path.resolve(a.out)), { recursive: true });

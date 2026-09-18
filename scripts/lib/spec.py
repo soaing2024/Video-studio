@@ -91,6 +91,9 @@ def normalize(spec: dict, base_dir: Path) -> dict:
         seg.setdefault("data", {})
         seg.setdefault("assets", {})
         seg["assets"] = {k: _resolve(v, base_dir) for k, v in seg["assets"].items()}
+        # A custom template is a project file exactly like an asset: resolve it next to the spec
+        # so the result does not depend on the directory the command happened to run from.
+        seg["template"] = _resolve_template(seg["template"], base_dir)
 
     timeline = spec.get("timeline")
     if not timeline:
@@ -130,6 +133,18 @@ def _resolve(value, base_dir: Path) -> str:
     if not isinstance(value, str):
         return value
     p = Path(value).expanduser()
+    if not p.is_absolute():
+        p = (base_dir / p).resolve()
+    return str(p)
+
+
+def _resolve_template(value, base_dir: Path) -> str:
+    """Bare names stay bare (built-in templates); paths become project-relative."""
+    if not isinstance(value, str):
+        return value
+    p = Path(value).expanduser()
+    if p.suffix.lower() != ".html" and len(p.parts) <= 1:
+        return value
     if not p.is_absolute():
         p = (base_dir / p).resolve()
     return str(p)
@@ -223,7 +238,7 @@ def validate(spec: dict) -> list[dict]:
         issues.append({"level": level, "where": where, "message": message})
 
     for seg in spec["segments"]:
-        tpl = render_mod.template_path(seg["template"])
+        tpl = render_mod.template_path(seg["template"], spec.get("base_dir"))
         if not tpl.is_file():
             add("error", seg["id"], f"template not found: {tpl}")
         for name, value in (seg.get("assets") or {}).items():
