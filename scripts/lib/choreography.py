@@ -118,7 +118,10 @@ def inject(spec: dict, log=print) -> dict:
         if data.get("still"):
             energy *= 0.5
         choreo = plan(sig, i, float(seg["duration"]), beats=local_beats, energy=energy,
-                      has_alt=bool(data.get("titleAlt")), has_counter=bool(data.get("counter")))
+                      has_alt=bool(data.get("titleAlt") or data.get("quoteAlt")
+
+                                    or data.get("captionVariants")),
+                      has_counter=bool(data.get("counter")))
         data["choreography"] = choreo
         total_states += choreo["states"]
         worst = max(worst, choreo["max_gap"])

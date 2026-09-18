@@ -42,7 +42,9 @@ def contrast(a, b) -> float:
 
 def ensure_contrast(fg, bg, target=7.0, dark_bg=True):
     """Push foreground lightness until the pair clears `target` contrast."""
-    h, s, l = colorsys.rgb_to_hls(*[c / 255.0 for c in fg])
+    # rgb_to_hls returns (hue, lightness, saturation) - unpacking it as (h, s, l) swaps two of the
+    # three and turns body text into a saturated mid-tone instead of near-white.
+    h, l, s = colorsys.rgb_to_hls(*[c / 255.0 for c in fg])
     for _ in range(60):
         if contrast(_hsl(h * 360, s, l), bg) >= target:
             break

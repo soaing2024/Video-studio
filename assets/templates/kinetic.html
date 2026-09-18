@@ -131,6 +131,7 @@ function build() {
   [layerBg, layerGhost, layerMid, layerFg, flash].forEach(l => { l.innerHTML = ""; });
   cvP.width = W(); cvP.height = H();
   seedParticles();
+  stage.style.fontFamily = Kit.FONT;
   stage.style.background = `linear-gradient(160deg, ${C.bg} 0%, ${rgba(C.bg, 0.88)} 55%, #04060c 100%)`;
 
   scene = new Anim.Scene();
@@ -193,16 +194,20 @@ function build() {
 
   // ---------- foreground type ----------
   const tx = lay.text.x * s, ty = lay.text.y * s, tw = lay.text.w * s;
-  const eyebrowEl = el(layerFg, "div", { position: "absolute", top: "0px", width: "100%", opacity: "0",
-    fontSize: `${12 * s}px`, letterSpacing: `${3 * s}px`, color: C.dim, textAlign: lay.text.align }, S.eyebrow || "");
+  // One column in normal flow: children stack from the title down, so they cannot overlap, and every
+  // element shares the same left edge so camera drift moves them together.
+  const column = el(layerFg, "div", { position: "absolute", left: `${tx}px`, top: `${ty}px`,
+    width: `${tw}px`, textAlign: lay.text.align });
+  const auto = lay.text.align === "center" ? "auto" : "0px";
+  const eyebrowEl = el(column, "div", { opacity: "0", marginBottom: `${8 * s}px`,
+    fontSize: `${12 * s}px`, letterSpacing: `${3 * s}px`, color: C.dim }, S.eyebrow || "");
 
-  const titleBox = el(layerFg, "div", { position: "absolute", top: `${(ty + 24 * s)}px`, left: `${tx}px`,
-    width: `${tw}px`, fontSize: `${(S.titleSize || 56) * TS * s}px`, fontWeight: "500",
-    letterSpacing: `${TRACK * s}px`, lineHeight: "1.12", color: C.text, textAlign: lay.text.align });
-  const altBox = S.titleAlt ? el(layerFg, "div", { position: "absolute", top: `${(ty + 24 * s)}px`, left: `${tx}px`,
-    width: `${tw}px`, fontSize: `${(S.titleSize || 56) * TS * s}px`, fontWeight: "500",
-    letterSpacing: `${TRACK * s}px`, lineHeight: "1.12", color: C.accent, textAlign: lay.text.align,
-    opacity: "0" }) : null;
+  const titleSlot = el(column, "div", { position: "relative" });
+  const titleBox = el(titleSlot, "div", { fontSize: `${(S.titleSize || 56) * TS * s}px`, fontWeight: "500",
+    letterSpacing: `${TRACK * s}px`, lineHeight: "1.12", color: C.text });
+  const altBox = S.titleAlt ? el(titleSlot, "div", { position: "absolute", left: "0px", top: "0px",
+    width: "100%", fontSize: `${(S.titleSize || 56) * TS * s}px`, fontWeight: "500",
+    letterSpacing: `${TRACK * s}px`, lineHeight: "1.12", color: C.accent }) : null;
 
   const wordActors = splitWords(S.title).map((piece, i) => {
     const span = document.createElement("span");
@@ -219,20 +224,20 @@ function build() {
     return { actor: scene.actor(span, { opacity: 0, y: 62, scale: 0.94, blur: 8 }) };
   }) : [];
 
-  const rule = el(layerFg, "div", { position: "absolute", opacity: "0", background: C.accent });
-  const sub = el(layerFg, "div", { position: "absolute", width: "100%", opacity: "0",
-    top: `${(24 + 54 * TS + 20) * s}px`, fontSize: `${15 * s}px`, letterSpacing: `${0.6 * s}px`,
-    color: C.dim, textAlign: lay.text.align }, S.subtitle || "");
-  const rowsTop = 24 + 54 * TS + 58;
+  const rule = el(column, "div", { opacity: "0", background: C.accent, marginTop: `${12 * s}px`,
+    marginLeft: auto, marginRight: auto });
+  const sub = el(column, "div", { opacity: "0", marginTop: `${14 * s}px`,
+    fontSize: `${15 * s}px`, letterSpacing: `${0.6 * s}px`, color: C.dim }, S.subtitle || "");
+  const rowsBox = el(column, "div", { marginTop: `${22 * s}px` });
   const rowData = (S.rows || []).slice(0, 4);
   const rowActors = rowData.map((r, i) => {
-    const wrap = el(layerFg, "div", { position: "absolute", top: `${(rowsTop + i * 54) * s}px`, opacity: "0",
-      left: lay.text.align === "center" ? "50%" : "0px", textAlign: lay.text.align });
-    if (lay.text.align === "center") wrap.style.marginLeft = `-${90 * s}px`;
+    const wrap = el(rowsBox, "div", { opacity: "0", marginBottom: `${14 * s}px`,
+      textAlign: lay.text.align });
     el(wrap, "div", { fontSize: `${11 * s}px`, letterSpacing: `${2 * s}px`, color: C.dim, textAlign: lay.text.align }, r.label || "");
     const val = el(wrap, "div", { fontSize: `${18 * s}px`, color: C.text, marginTop: `${5 * s}px`, whiteSpace: "nowrap" }, r.value || "");
     const track = el(wrap, "div", { marginTop: `${8 * s}px`, width: `${180 * s}px`, height: `${4 * s}px`,
-      background: rgba(C.border, 0.5), borderRadius: `${3 * s}px`, overflow: "hidden" });
+      marginLeft: auto, marginRight: auto, background: rgba(C.border, 0.5), borderRadius: `${3 * s}px`,
+      overflow: "hidden" });
     const fill = el(track, "div", { height: "100%", width: "0px", background: r.color || C.series[i % C.series.length] });
     return {
       wrapA: scene.actor(wrap, { opacity: 0, x: -34 }),
@@ -241,8 +246,7 @@ function build() {
     };
   });
 
-  const callout = el(layerFg, "div", { position: "absolute", opacity: "0",
-    top: `${(rowsTop + Math.min(rowActors.length, 4) * 54 + 14) * s}px`,
+  const callout = el(column, "div", { opacity: "0", marginTop: `${6 * s}px`, textAlign: "left",
     borderLeft: `${2 * s}px solid ${C.accent2}`, paddingLeft: `${12 * s}px` });
   el(callout, "div", { fontSize: `${12 * s}px`, color: C.text }, (S.callout && S.callout.c1) || "");
   el(callout, "div", { fontSize: `${11 * s}px`, color: C.dim, marginTop: `${4 * s}px` }, (S.callout && S.callout.c2) || "");
@@ -266,8 +270,7 @@ function build() {
     Object.assign(rule.style, { background: "transparent", borderLeft: `${4 * s}px solid ${C.accent}`,
       borderTop: `${4 * s}px solid ${C.accent}` });
   } else rule.style.borderRadius = `${3 * s}px`;
-  Object.assign(rule.style, { top: `${(ty + 24 * s + 54 * TS * s + 6 * s)}px`,
-    left: `${tx + (lay.text.align === "center" ? (tw - ruleW) / 2 : 0)}px`, width: "0px", height: `${ruleH}px` });
+  Object.assign(rule.style, { width: "0px", height: `${ruleH}px` });
 
   if (DENSITY === "minimal") {
     rowActors.forEach(r => { r.wrapA.node.style.display = "none"; });
@@ -313,17 +316,24 @@ function build() {
             { at: e0 + 0.35, dur: 1.1, ease: "out", arc: 18 });
   if (scrimA) scrimA.to({ opacity: 1 }, { at: e0 + 0.5, dur: 0.8, ease: "out" });
   footerA.to({ opacity: 0.9 }, { at: e0 + 0.9, dur: 0.6 });
+  // Rows belong to the shot, not to a particular beat: without a build beat they used to never
+  // appear at all. They arrive with the headline; later beats only move them.
+  rowActors.forEach((r, i) => {
+    r.wrapA.to({ opacity: 1, x: 0 }, { at: e0 + 1.0 + i * stagger, dur: 0.55, ease: "out", anticipation: 0.15 });
+    r.fillA.to({ width: 180 * s * r.weight }, { at: e0 + 1.1 + i * stagger, dur: 0.8, spring: 0.5, damping: 0.6 });
+  });
+  calloutA.to({ opacity: 1, x: 0 }, { at: e0 + 1.2 + rowActors.length * stagger, dur: 0.6, ease: "out", arc: 10 });
 
   // every remaining beat moves what is already on screen
   beats.filter(b => !["establish", "exit"].includes(b.kind)).forEach((b, n) => {
     const k = b.kind, I = intensityOf(b);
     if (k === "build") {
       rowActors.forEach((r, i) => {
-        r.wrapA.to({ opacity: 1, x: 0 }, { at: b.t + i * stagger, dur: 0.5, ease: "out", anticipation: 0.15 });
         r.fillA.to({ width: 180 * s * r.weight * Math.min(1.15, I) },
-                   { at: b.t + 0.08 + i * stagger, dur: 0.75, spring: 0.5, damping: 0.55 });
+                   { at: b.t + i * stagger, dur: 0.75, spring: 0.5, damping: 0.55 });
+        r.wrapA.to({ x: 6 + 4 * (i % 2) }, { at: b.t + i * stagger, dur: 0.35, ease: "out" });
+        r.wrapA.to({ x: 0 }, { at: b.t + 0.45 + i * stagger, dur: 0.5, spring: 0.7, damping: 0.5 });
       });
-      calloutA.to({ opacity: 1, x: 0 }, { at: b.t + 0.3, dur: 0.6, ease: "out", arc: 10 });
     } else if (k === "transform") {
       const grow = 1.1 + 0.5 * I;
       motifA.to({ scale: Math.min(3.4, grow), rot: 24 + 40 * I,

@@ -85,8 +85,8 @@ function build() {
   const box = Kit.el(kit.layerFg, "div", { position: "absolute", left: `${180 * s}px`, right: `${140 * s}px`,
     top: `${176 * s}px`, fontSize: `${(S.quoteSize || 44) * TS * s}px`, lineHeight: "1.36", color: C.text });
   const altBox = ALT ? Kit.el(kit.layerFg, "div", { position: "absolute", left: `${180 * s}px`, right: `${140 * s}px`,
-    top: `${176 * s}px`, fontSize: `${(S.quoteSize || 44) * TS * s}px`, lineHeight: "1.36", color: C.accent,
-    opacity: "0" }) : null;
+    top: `${176 * s}px`, fontSize: `${(S.quoteSize || 44) * TS * s}px`, lineHeight: "1.36",
+    color: C.accent }) : null;   // the container must stay opaque: its spans carry the animation
 
   const lineActors = chunksOf(QUOTE).map((piece) => {
     const span = document.createElement("span");
@@ -179,6 +179,7 @@ window.__sceneReady = true;
 window.seek = (t) => {
   const fadeOut = 1 - Anim.EASE.out(Math.min(1, Math.max(0, (t - (D - 0.4)) / 0.4)));
   const bump = L.cam.apply(t);
+  L.scene.seek(t, null);          // render every actor: without this the scene stays at opacity 0
   L.blobs.forEach(b => b.render(t));
   L.kit.layerFg.style.opacity = fadeOut.toFixed(4);
   L.kit.layerMid.style.opacity = fadeOut.toFixed(4);
