@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<title>blank scene</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #0b0d0c; }
+  #stage { position: absolute; inset: 0; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+
+<!-- Plumbing only. This file has no palette, no layout and no motion idea in it, on purpose:
+     a shot is composed for the video it is in (references/choreography.md), not filled in here.
+     Replace everything below the mount() call with the shot you designed. -->
+<!-- The runtimes (Scene / Anim / Kit) are injected by the renderer before this script runs, so
+     a scene never has to resolve a path - it gets copied into whatever project it belongs to. -->
+<script>
+const S = Scene.mount({ background: "#0b0d0c" });
+const type = S.layer("type");
+const D = (window.SCENE && window.SCENE.duration) || 5;
+
+const box = Scene.safe();
+const title = document.createElement("div");
+Scene.type(title, 0.16, { weight: "600" });
+title.textContent = (window.SCENE && window.SCENE.title) || "";
+Object.assign(title.style, { position: "absolute", left: `${box.left}px`, top: `${box.top + box.height * 0.32}px` });
+type.appendChild(title);
+
+const caption = document.createElement("div");
+Scene.type(caption, 0.028, { color: "#93a39b", lineHeight: "1.6" });
+caption.textContent = (window.SCENE && window.SCENE.caption) || "";
+Object.assign(caption.style, { position: "absolute", left: `${box.left}px`, top: `${box.top + box.height * 0.62}px`, maxWidth: "34ch" });
+type.appendChild(caption);
+
+Scene.ready();
+
+// A clock, not a design decision. Everything above enters once and then holds, which makes most
+// frames identical and fails verify's motion gate. Every animated shot owes at least one thing
+// that keeps travelling; replace this with whatever in your shot should carry the time.
+const rule = document.createElement("div");
+// It has AREA on purpose. A thin moving line reads as motion to a person but covers so few
+// pixels that verify's gate cannot see it: measured 0.72/255 at 1920x1080 for a 2px rule, and
+// 2.3/255 for the same rule at 320x180. The gate is resolution-relative, so a shot has to move
+// enough of the frame, not merely have something moving in it.
+Object.assign(rule.style, { position: "absolute", left: "0px", top: `${box.top + box.height}px`,
+  height: `${box.height * 0.18}px`, width: `${box.width * 0.45}px`, background: "#6b7a72", opacity: "0.85" });
+type.appendChild(rule);
+const sweep = box.width * 1.45;
+Object.assign(rule.style, { left: `${-box.width * 0.45}px` });
+
+window.seek = (t) => {
+  const enter = 1 - Math.pow(1 - Math.min(1, Math.max(0, (t - 0.3) / 0.8)), 3);
+  title.style.opacity = String(enter);
+  caption.style.opacity = String(Math.max(0, (t - 0.9) / 0.9));
+  // Repeating, not stretched across the take: a single sweep spread over 20s moves too slowly to
+  // read as motion (measured 0.79/255). A clock that cycles every few seconds keeps any take
+  // length alive, and it exits the frame so nothing accumulates.
+  const phase = (t % 3) / 3;
+  rule.style.transform = `translate3d(${(phase * sweep).toFixed(1)}px, 0, 0)`;
+};
+</script>
+</body>
+</html>

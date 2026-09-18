@@ -5,7 +5,7 @@
     python vs.py probe <file>...
     python vs.py sprite <image> [--out dir] [--width 64 --height 96 --colors 12]
     python vs.py beats <audio> [--cuts <seconds>]
-    python vs.py init <dir> [--name x] [--template short|longform]
+    python vs.py init <dir> [--name x] [--duration 20]
     python vs.py render <project.json> [--jobs N] [--force]
     python vs.py assemble <project.json> [--out out.mp4]
     python vs.py verify <project.json> [--video out.mp4] [--samples 5]
@@ -118,28 +118,49 @@ def cmd_beats(args) -> int:
     return 0
 
 
+CREDITS_STUB = """# 素材与授权
+
+每个外部素材一行：文件名 / 来源页 / 作者 / 授权 / 是否需署名。
+取用规则见技能的 references/libraries.md。
+"""
+
+
 def cmd_init(args) -> int:
+    """Scaffold a single-take project: one spec, one scene to write.
+
+    One take, no cuts: there is nothing to assemble, so the whole job is composing the shot
+    (references/choreography.md). The scene shipped as the starting file is plumbing - a `seek(t)`
+    body with nothing designed in it.
+    """
     target = Path(args.dir).expanduser().resolve()
     target.mkdir(parents=True, exist_ok=True)
-    names = {"starter": "starter.json", "short": "short.json", "longform": "longform.json"}
-    source = EXAMPLES / names[args.template]
     project = target / "project.json"
     if project.exists():
         print(f"refusing to overwrite {project}", file=sys.stderr)
         return 1
-    name = args.name or target.name
-    text = source.read_text(encoding="utf-8").replace('"name": "example"', f'"name": "{name}"')
-    text = text.replace('"name": "starter"', f'"name": "{name}"')
-    project.write_text(text, encoding="utf-8")
-    (target / "assets").mkdir(exist_ok=True)
 
-    missing = sorted({m for m in re.findall(r'"(assets/[^"]+)"', text)
-                      if not (target / m).exists()})
-    note = "edit project.json, then run: vs.py run project.json"
-    if missing:
-        note = (f"add these files under ./assets before rendering: {', '.join(missing)}; " + note)
-    emit({"project": str(project), "template": args.template,
-          "missing_assets": missing, "note": note})
+    name = args.name or target.name
+    scene = target / "scenes" / "take.html"
+    scene.parent.mkdir(parents=True, exist_ok=True)
+    scene.write_text(render.BLANK_SCENE.read_text(encoding="utf-8"), encoding="utf-8")
+
+    spec = {
+        "name": name,
+        "video": {"width": 1920, "height": 1080, "fps": 30, "crf": 20, "preset": "medium"},
+        "render": {"jobs": 3, "crf": 12},
+        "duration": float(args.duration),
+        "scene": "scenes/take.html",
+        "hold": [],
+        "look": {"fade_in": 0.5, "fade_out": 0.8, "progress_bar": {"height": 4}},
+        "data": {"title": "第一镜", "caption": ""},
+    }
+    project.write_text(json.dumps(spec, ensure_ascii=False, indent=2), encoding="utf-8")
+    (target / "assets").mkdir(exist_ok=True)
+    credits = target / "assets" / "CREDITS.md"
+    if not credits.exists():
+        credits.write_text(CREDITS_STUB, encoding="utf-8")
+    emit({"project": str(project), "scene": "scenes/take.html",
+          "note": "one take, no cuts - write the shot, then preview / plan / run"})
     return 0
 
 
@@ -162,7 +183,7 @@ def _write_swatch(sig: dict, path: str) -> str:
         x += w
     d.text((24, 14), f"seed {sig['seed']} | {sig['palette_name']} | {sig['pacing']} | {sig['texture']}",
            fill=tuple(int(cols["text"].lstrip('#')[i:i + 2], 16) for i in (0, 2, 4)))
-    d.text((24, 196), "layouts(k): " + ", ".join(sig["layouts"]["kinetic"]),
+    d.text((24, 196), "compositions: " + ", ".join(sig["compositions"]),
            fill=tuple(int(cols["dim"].lstrip('#')[i:i + 2], 16) for i in (0, 2, 4)))
     d.text((24, 216), "motions: " + ", ".join(sig["motions"]),
            fill=tuple(int(cols["dim"].lstrip('#')[i:i + 2], 16) for i in (0, 2, 4)))
@@ -191,9 +212,10 @@ def cmd_brief(args) -> int:
         report.update(brief_mod.save(brief, args.out))
     else:
         report["brief"] = brief
-    report["beats_summary"] = [
-        {"id": b["id"], "act": b["act"], "template": b["template"],
-         "device": b["visual_device"], "seconds": b["seconds"]} for b in brief["structure"]]
+    report["timeline_summary"] = [
+        {"index": c.get("index"), "at": c.get("at"), "seconds": c.get("seconds"),
+         "device": c.get("device"), "on_screen": c.get("on_screen")}
+        for c in (brief.get("take") or {}).get("timeline", [])]
     emit(report)
     return 0 if not [i for i in report["issues"] if i["level"] == "error"] else 1
 
@@ -211,10 +233,12 @@ def cmd_compile(args) -> int:
                                    progress_bar=not args.no_progress)
     out = Path(args.out) if args.out else Path(args.brief).with_name("project.json")
     out.write_text(json.dumps(spec, ensure_ascii=False, indent=2), encoding="utf-8")
-    emit({"ok": True, "project": str(out), "segments": len(spec["segments"]),
+    emit({"ok": True, "project": str(out), "duration": spec["duration"],
+          "scene_to_write": spec["scene"], "hold": spec.get("hold") or [],
           "narration_lines": len(spec.get("narration", {}).get("lines", [])),
-          "images": sum(1 for s in spec["segments"] for v in s["assets"].values()
-                        if isinstance(v, dict)),
+          "chapters": len(spec.get("data", {}).get("timeline", [])),
+          "hold_seconds": round(sum(b - a for a, b in (spec.get("hold") or [])), 2),
+          "note": "write the scene, then: vs.py preview / plan / run",
           "style_seed": spec["style"]["seed"],
           "warnings": [i for i in issues if i["level"] == "warning"]})
     return 0
@@ -313,10 +337,10 @@ def cmd_preview(args) -> int:
     data_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     w, h, _ = render.work_size(spec)
     cmd = [runtime.find_node(), str(HERE / "render_segment.mjs"),
-           "--scene", str(render.template_path(seg["template"])), "--out", str(out.with_suffix(".mp4")),
+           "--scene", str(render.scene_path(seg)), "--out", str(out.with_suffix(".mp4")),
            "--data", str(data_file), "--fps", str(spec["video"]["fps"]),
            "--duration", str(seg["duration"]), "--width", str(w), "--height", str(h),
-           "--still", str(args.at), "--still-out", str(out)]
+           "--still", str(args.at), "--still-out", str(out)] + render.runtime_args()
     import subprocess
     proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
                           env=render.runtime_env())
@@ -410,14 +434,17 @@ def cmd_plan(args) -> int:
         except OSError:
             hit = False
         cached += int(hit)
+        # A take can declare still stretches; those frames are reused, so they are not render cost.
+        held = sum(max(0.0, float(b) - float(a)) for a, b in (seg.get("hold") or []))
+        held_frames = int(round(held * fps))
         if is_still:
             still += 1
         else:
             animated += 1
-            frames += f
-        rows.append({"segment": seg["id"], "template": seg["template"],
-                     "seconds": seg["duration"], "frames": 0 if is_still else f,
-                     "still": is_still, "cached": hit})
+            frames += max(0, f - held_frames)
+        rows.append({"segment": seg["id"], "scene": Path(seg["scene"]).name,
+                     "seconds": seg["duration"], "frames": 0 if is_still else f - held_frames,
+                     "hold": round(held, 2), "still": is_still, "cached": hit})
     jobs = max(1, min(int(spec["render"].get("jobs", 2)), os.cpu_count() or 4))
     seconds = frames * ms_per_frame / 1000 / jobs * 1.15
     errors = [i for i in issues if i["level"] == "error"]
@@ -444,16 +471,14 @@ SELFTEST_PROJECT = {
     "video": {"width": 640, "height": 360, "fps": 24, "crf": 24, "preset": "veryfast"},
     "render": {"jobs": 2, "crf": 16},
     "look": {"accent": "#e0455f", "pixelate": {"scale": 2, "colors": 16},
-             "fade_in": 0.3, "fade_out": 0.3, "progress_bar": {"height": 2}},
-    "segments": [
-        {"id": "a", "template": "kinetic", "duration": 2.0,
-         "data": {"eyebrow": "SELFTEST", "title": "render ok",
-                  "rows": [{"label": "A", "value": "one", "weight": 1.0}]}},
-        {"id": "b", "template": "caption", "duration": 2.0,
-         "data": {"still": True, "title": "hold ok", "caption": "still segment"}}
-    ],
-    "timeline": [{"segment": "a"},
-                 {"segment": "b", "transition": {"type": "fade", "duration": 0.4}}],
+             "fade_in": 0.3, "fade_out": 0.6, "progress_bar": {"height": 2}},
+    # One take: a single scene for the whole runtime, with a held stretch in the middle. That hold
+    # exercises the only cost lever a single take still has - the renderer reuses one frame instead
+    # of screenshotting 1.4s of identical picture.
+    "duration": 3.6,
+    "scene": "scenes/take.html",
+    "hold": [[2.0, 3.2]],
+    "data": {"title": "render ok", "caption": "one take, no cuts"},
 }
 
 
@@ -469,6 +494,11 @@ def cmd_selftest(args) -> int:
         spec_dict = json.loads(json.dumps(SELFTEST_PROJECT))
         spec_dict["audio"] = {"tracks": [{"src": "bed.wav", "gain_db": -6, "loop": True,
                                         "fade_in": 0.3, "fade_out": 0.3}]}
+        # The selftest uses the shipped blank scene: it is the only one the skill ships, and it
+        # is exactly the file an author starts from.
+        (tmp / "scenes").mkdir(exist_ok=True)
+        (tmp / "scenes" / "take.html").write_text(
+            render.BLANK_SCENE.read_text(encoding="utf-8"), encoding="utf-8")
         project = tmp / "project.json"
         project.write_text(json.dumps(spec_dict, indent=2), encoding="utf-8")
         spec = specmod.load(str(project))
@@ -517,7 +547,7 @@ def build_parser() -> argparse.ArgumentParser:
     ini = sub.add_parser("init", help="scaffold a project directory")
     ini.add_argument("dir", nargs="?", default=".")
     ini.add_argument("--name")
-    ini.add_argument("--template", choices=["starter", "short", "longform"], default="starter")
+    ini.add_argument("--duration", type=float, default=20.0, help="take length in seconds")
     ini.set_defaults(func=cmd_init)
 
     r = sub.add_parser("render", help="render segments to cached intermediate clips")

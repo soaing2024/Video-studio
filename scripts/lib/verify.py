@@ -160,6 +160,11 @@ class Verifier:
             total_len = specmod.planned_duration(spec) or 1.0
             still_len = 0.0
             seg_map = specmod.segment_map(spec)
+            for seg in spec.get("segments", []):
+                # A single take declares its still stretches as `hold` windows. That is the same
+                # deliberate stillness a `still: true` segment used to be, so it earns the same
+                # credit against the frozen-frame budget.
+                still_len += sum(max(0.0, float(b) - float(a)) for a, b in (seg.get("hold") or []))
             for item in spec.get("timeline", []):
                 seg = seg_map.get(item.get("segment"))
                 if seg and (seg.get("data") or {}).get("still"):

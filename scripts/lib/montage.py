@@ -10,7 +10,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from . import beats, probe, spec as specmod
+from . import render, beats, probe, spec as specmod
 
 VIDEO_SUFFIXES = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
 IMAGE_SUFFIXES = specmod.IMAGE_SUFFIXES
@@ -122,12 +122,17 @@ def build(ffmpeg: str, media_dir: str, music: str, out: str,
     }
 
     if title:
+        # Title cards are scenes too: copy the blank one next to the project, then point at it.
+        scene_dir = Path(out).parent / "scenes"
+        scene_dir.mkdir(parents=True, exist_ok=True)
+        blank = render.BLANK_SCENE.read_text(encoding="utf-8")
+        for sid in ("card-in", "card-out"):
+            (scene_dir / f"{sid}.html").write_text(blank, encoding="utf-8")
         spec["segments"] = [
-            {"id": "card-in", "template": "kinetic", "duration": max(2.5, cfg["min_len"] * 2),
-             "data": {"eyebrow": "MONTAGE", "title": title, "subtitle": f"{len(timeline)} cuts",
-                      "footer": f"{style} - {fps} fps"}},
-            {"id": "card-out", "template": "kinetic", "duration": 3.0,
-             "data": {"eyebrow": "END", "title": title, "subtitle": "thanks for watching"}},
+            {"id": "card-in", "scene": "scenes/card-in.html", "duration": max(2.5, cfg["min_len"] * 2),
+             "data": {"title": title, "caption": f"{len(timeline)} cuts - {style} - {fps} fps"}},
+            {"id": "card-out", "scene": "scenes/card-out.html", "duration": 3.0,
+             "data": {"title": title, "caption": "thanks for watching"}},
         ]
         spec["timeline"].insert(0, {"segment": "card-in",
                                     "transition": {"type": "fade", "duration": 0.4}})

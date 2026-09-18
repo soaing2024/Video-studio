@@ -39,6 +39,12 @@ const page = await browser.newPage({ viewport: { width, height }, deviceScaleFac
 const errors = [];
 page.on("pageerror", (e) => errors.push(String(e)));
 await page.addInitScript((scene) => { window.SCENE = scene; }, data);
+// The skill's runtimes are injected, not linked from the scene: a scene file gets copied into
+// the project it belongs to, so any relative <script src> it carried would break. Authors write
+// `seek(t)` and nothing else; `Scene`, `Anim` and `Kit` are already on the page.
+for (const rt of String(a.runtimes || "").split(",").filter(Boolean)) {
+  await page.addInitScript({ path: rt });
+}
 await page.goto("file:///" + path.resolve(a.scene).replace(/\\/g, "/"));
 await page.waitForFunction('typeof window.seek === "function" && window.__sceneReady !== false', null, { timeout: 30000 });
 await page.evaluate(() => document.fonts.ready);
@@ -69,8 +75,25 @@ const ff = spawn(a.ffmpeg || "ffmpeg", [
 let ffmpegError = null;
 ff.on("error", (e) => { ffmpegError = String(e); });
 
+// `--hold 0-2,7-9`: stretches of this take where the picture genuinely does not change.
+const holds = String(a.hold || "").split(",").filter(Boolean).map((s) => {
+  const [x, y] = s.split("-").map(Number);
+  return [x, y];
+}).filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y) && y > x);
+let lastBuf = null;
+let distinct = 0;
+
 for (let i = 0; i < total; i++) {
-  const buf = await frameAt(i / fps);
+  const t = i / fps;
+  // Inside a hold we reuse the previous frame instead of screenshotting: the take stays uncut and
+  // the cost follows the number of *distinct* frames - the only cost lever a single take has left,
+  // now that there are no separate still segments to lean on.
+  const held = holds.some(([x, y]) => t > x + 0.5 / fps && t < y);
+  const buf = held && lastBuf ? lastBuf : await frameAt(t);
+  if (!held) {
+    lastBuf = buf;
+    distinct += 1;
+  }
   if (!ff.stdin.write(buf)) await once(ff.stdin, "drain");
 }
 ff.stdin.end();
@@ -78,5 +101,6 @@ const code = await new Promise((resolve) => ff.on("close", resolve));
 await browser.close();
 
 const ok = code === 0 && !ffmpegError && errors.length === 0;
-console.log(JSON.stringify({ ok, frames: total, seconds: duration, size: [width, height], errors, ffmpegError }));
+console.log(JSON.stringify({ ok, frames: total, distinctFrames: distinct, holds, seconds: duration,
+                           size: [width, height], errors, ffmpegError }));
 process.exit(ok ? 0 : 1);

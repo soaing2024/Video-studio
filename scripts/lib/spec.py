@@ -69,8 +69,36 @@ def normalize(spec: dict, base_dir: Path) -> dict:
     spec.setdefault("render", {}).setdefault("jobs", 2)
     spec.setdefault("render", {}).setdefault("crf", 12)
     spec.setdefault("segments", [])
-    if not spec["segments"] and not spec.get("timeline"):
-        raise SpecError("project has neither segments nor a timeline")
+    # Three shapes are valid: a single take (scene + duration), the multi-shot form, or a bare
+    # timeline of source clips. The single take is the documented one.
+    if not spec["segments"] and not spec.get("timeline") and not spec.get("scene"):
+        raise SpecError("project has neither a scene, nor segments, nor a timeline")
+
+    # A project is one take: a scene and a duration. Nothing is cut, so there is nothing to order
+    # and no timeline to assemble - which is why `segments` and `timeline` are not the documented
+    # shape any more. They still work for the one case that is inherently multi-shot: a montage of
+    # existing footage (`vs.py montage`), where `source` clips are the point.
+    if spec.get("scene") and not spec.get("segments"):
+        if not spec.get("duration"):
+            raise SpecError("a single-take project needs a `duration` in seconds")
+        # `"auto"` means "however long the narration takes", the same contract segments had;
+        # `vs.py narrate` fills it in from what was actually spoken.
+        take = 0.0 if spec["duration"] == "auto" else float(spec["duration"])
+        holds = spec.get("hold") or []
+        for pair in holds:
+            if (not isinstance(pair, (list, tuple)) or len(pair) != 2
+                    or not 0 <= float(pair[0]) < float(pair[1]) <= take):
+                raise SpecError(f"hold window {pair!r} is not a [start, end] inside 0..{take}")
+        spec["segments"] = [{
+            "id": spec.get("take_id") or "take",
+            "scene": spec["scene"],
+            "duration": take,
+            "data": spec.get("data") or {},
+            "assets": spec.get("assets") or {},
+            "hold": [list(map(float, pair)) for pair in holds],
+        }]
+        spec["timeline"] = [{"segment": spec["segments"][0]["id"]}]
+        spec["single_take"] = True
 
     ids = [s.get("id") for s in spec["segments"]]
     if any(not i for i in ids):
@@ -81,7 +109,8 @@ def normalize(spec: dict, base_dir: Path) -> dict:
         spec["timeline"] = spec.get("timeline") or []
 
     for seg in spec["segments"]:
-        seg.setdefault("template", "kinetic")
+        seg["scene"] = _resolve_scene(seg, base_dir)
+        seg.pop("template", None)        # legacy spelling; a shot is a file, not a name
         if "duration" not in seg:
             raise SpecError(f"segment '{seg['id']}' needs a duration in seconds")
         if isinstance(seg["duration"], str) and seg["duration"] == "auto":
@@ -91,6 +120,7 @@ def normalize(spec: dict, base_dir: Path) -> dict:
         seg.setdefault("data", {})
         seg.setdefault("assets", {})
         seg["assets"] = {k: _resolve(v, base_dir) for k, v in seg["assets"].items()}
+        seg.setdefault("hold", [])
 
     timeline = spec.get("timeline")
     if not timeline:
@@ -133,6 +163,27 @@ def _resolve(value, base_dir: Path) -> str:
     if not p.is_absolute():
         p = (base_dir / p).resolve()
     return str(p)
+
+
+def _resolve_scene(seg: dict, base_dir: Path) -> str:
+    """A shot is the scene file its author wrote for this video.
+
+    There is no name-to-file menu: the built-in skeletons were removed on purpose, because a
+    video assembled from them is the same video for every brief. `scene` resolves against the
+    project directory; the old `template:` name form resolved against the process cwd, which made
+    the same project render from one directory and fail from another.
+    """
+    raw = seg.get("scene") or seg.get("template")
+    if not raw:
+        raise SpecError(
+            f"segment '{seg['id']}' has no scene: write the shot, then point `scene` at it " 
+            "(references/choreography.md)")
+    p = Path(str(raw)).expanduser()
+    if p.suffix.lower() != ".html":
+        raise SpecError(
+            f"segment '{seg['id']}': `scene` has to be a path to an .html scene, got '{raw}'. "
+            "There are no built-in templates to pick by name any more.")
+    return str(p if p.is_absolute() else (base_dir / p).resolve())
 
 
 def segment_map(spec: dict) -> dict:
@@ -223,9 +274,13 @@ def validate(spec: dict) -> list[dict]:
         issues.append({"level": level, "where": where, "message": message})
 
     for seg in spec["segments"]:
-        tpl = render_mod.template_path(seg["template"])
-        if not tpl.is_file():
-            add("error", seg["id"], f"template not found: {tpl}")
+        scene = render_mod.scene_path(seg)
+        if not scene.is_file():
+            add("error", seg["id"], f"scene not found: {scene}")
+        if spec.get("single_take") and (seg.get("data") or {}).get("still"):
+            add("error", seg["id"],
+                "`still` would freeze the entire take at one frame; declare the static stretches "
+                "with `hold: [[start, end]]` instead")
         for name, value in (seg.get("assets") or {}).items():
             if isinstance(value, dict):       # a prompt, generated before rendering
                 if not value.get("prompt"):
@@ -237,6 +292,9 @@ def validate(spec: dict) -> list[dict]:
             add("error", seg["id"], "duration is 0 or missing")
         if not (seg.get("data") or {}).get("still") and float(seg.get("duration") or 0) > 30:
             add("warning", seg["id"], f"{seg['duration']}s of full animation is expensive; consider still: true")
+
+    # Every shot being its own scene is now structural: `normalize` refuses a segment without one,
+    # so there is nothing left to warn about here.
 
     for item in spec["timeline"]:
         where = item.get("segment") or item.get("source") or "timeline"

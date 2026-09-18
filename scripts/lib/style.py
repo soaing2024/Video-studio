@@ -1,6 +1,6 @@
 """Seeded style engine.
 
-The problem this solves: a template with fixed choreography makes every video look the same.
+The problem this solves: a fixed skeleton makes every video look the same.
 Here a seed becomes a concrete visual direction - palette, type scale, composition, motion
 family, texture, transitions, pacing - and each segment gets its own resolved variant, with
 adjacency guaranteed to differ. Same seed reproduces exactly; a new seed is a new look.
@@ -68,15 +68,11 @@ HARMONIES = {
     "split": [0, 150, 210, 30],
 }
 
-LAYOUTS = {
-    "kinetic": ["editorial", "split", "center", "corner", "fullbleed", "banner"],
-    "caption": ["panel-right", "panel-left", "full-bleed", "stacked", "framed"],
-    "pixel": ["classic", "compact", "wide"],
-    "chart": ["left-axis", "full-width"],
-    "stat": ["center", "offset"],
-    "quote": ["left-bar", "centered"],
-    "terminal": ["window", "frameless"],
-}
+# Composition archetypes are a vocabulary for talking about a shot, not a set of layouts to fill.
+COMPOSITIONS = [
+    "editorial", "split", "center", "corner", "fullbleed", "banner",
+    "stacked", "framed", "offset", "flat-lay", "diagonal", "index",
+]
 
 MOTIONS = {
     "rise": {"from": {"y": 42, "opacity": 0}, "ease": "cubic", "scale": 0},
@@ -146,11 +142,8 @@ def make_signature(seed: int | None = None, overrides: dict | None = None,
     type_scale = round(rng.uniform(0.92, 1.14), 3)
     tracking = round(rng.uniform(-0.4, 1.6), 2)
 
-    layout_orders = {}
-    for name, options in LAYOUTS.items():
-        pool = list(options)
-        rng.shuffle(pool)
-        layout_orders[name] = pool
+    composition_pool = list(COMPOSITIONS)
+    rng.shuffle(composition_pool)
     motion_pool = list(MOTIONS)
     rng.shuffle(motion_pool)
     transition_pool = list(TRANSITIONS)
@@ -171,7 +164,7 @@ def make_signature(seed: int | None = None, overrides: dict | None = None,
         },
         "type": {"scale": type_scale, "tracking": tracking,
                  "weight": rng.choice([400, 500]), "case": rng.choice(["normal", "normal", "upper"])},
-        "layouts": layout_orders,
+          "compositions": composition_pool,
         "motions": motion_pool,
         "transitions": transition_pool,
         "texture": rng.choice(TEXTURES),
@@ -205,14 +198,14 @@ def resolve_visual(sig: dict, index: int, total: int, seg: dict | None = None) -
     """Concrete instructions for one segment: layout, motion, accent, texture, pace."""
     seg = seg or {}
     data = seg.get("data") or {}
-    template = seg.get("template", "kinetic")
     explicit = data.get("visual") or {}
 
-    layouts = sig["layouts"].get(template) or list(LAYOUTS["kinetic"])
+    # A suggestion, not an assignment: the scene decides its own composition and may ignore this.
+    pool = sig.get("compositions") or list(COMPOSITIONS)
     motions = sig["motions"]
     pace = PACING.get(sig["pacing"], PACING["steady"])
 
-    layout = explicit.get("layout") or layouts[index % len(layouts)]
+    layout = (explicit.get("composition") or explicit.get("layout")) or pool[index % len(pool)]
     motion = explicit.get("entrance") or motions[index % len(motions)]
     motion_spec = dict(MOTIONS.get(motion, MOTIONS["rise"]))
 
@@ -290,7 +283,7 @@ def similarity(a: dict, b: dict) -> float:
     score += 0.15 * (a["pacing"] == b["pacing"])
     score += 0.10 * (a["texture"] == b["texture"])
     score += 0.10 * _jaccard(a["motions"][:3], b["motions"][:3])
-    score += 0.15 * _jaccard(a["layouts"].get("kinetic", []), b["layouts"].get("kinetic", []))
+    score += 0.15 * _jaccard(a.get("compositions", []), b.get("compositions", []))
     return round(min(1.0, score), 3)
 
 
@@ -321,7 +314,7 @@ def report(spec: dict) -> dict:
     sig = (spec.get("style") or {}).get("signature") or {}
     segs = spec.get("segments", [])
     visuals = [(s.get("data") or {}).get("visual") or {} for s in segs]
-    layouts = [v.get("layout") for v in visuals if v]
+    layouts = [v.get("layout") for v in visuals if v]      # the advisory composition hint
     motions = [v.get("motion") for v in visuals if v]
     transitions = [(item.get("transition") or {}).get("type", "cut") for item in spec.get("timeline", [])]
     adjacent_repeat = sum(1 for i in range(1, len(layouts)) if layouts[i] == layouts[i - 1])

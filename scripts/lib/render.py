@@ -1,4 +1,4 @@
-"""Orchestrate segment rendering: templates + data -> cached intermediate clips.
+"""Orchestrate segment rendering: an authored scene + data -> cached intermediate clips.
 
 Long-form safety: each segment is rendered straight into its own mp4 through a pipe,
 so no PNG sequence ever reaches disk, and a 5-minute project is 30-40 small files
@@ -16,7 +16,8 @@ from pathlib import Path
 from . import imagegen, runtime, spec as specmod
 from .sprite import make_sprite
 
-TEMPLATES = runtime.SKILL_DIR / "assets" / "templates"
+# The only scene the skill ships: plumbing, no design. `vs.py init` copies it as a starting file.
+BLANK_SCENE = runtime.SKILL_DIR / "assets" / "scenes" / "_blank.html"
 
 
 def work_size(spec: dict) -> tuple[int, int, int]:
@@ -29,11 +30,26 @@ def work_size(spec: dict) -> tuple[int, int, int]:
     return spec["video"]["width"], spec["video"]["height"], 1
 
 
-def template_path(name: str) -> Path:
-    p = Path(name)
-    if p.suffix == ".html":
-        return p if p.is_absolute() else (Path.cwd() / p)
-    return TEMPLATES / f"{name}.html"
+def scene_path(seg: dict) -> Path:
+    """The scene an author wrote for this shot. `spec.normalize` already made it absolute.
+
+    There is no name-to-file lookup: a shot is a file, not a selection. That removes the old
+    cwd-relative trap as well, since the project directory is known at load time."""
+    return Path(str(seg.get("scene") or ""))
+
+
+def hold_args(seg: dict) -> list[str]:
+    """Stretches inside a single take where the frame does not change; the renderer reuses one frame."""
+    holds = seg.get("hold") or []
+    if not holds:
+        return []
+    return ["--hold", ",".join(f"{float(a):.3f}-{float(b):.3f}" for a, b in holds)]
+
+
+def runtime_args() -> list[str]:
+    """The pure-function runtimes every scene gets injected with, in load order."""
+    rt = runtime.SKILL_DIR / "assets" / "runtime"
+    return ["--runtimes", ",".join(str(rt / n) for n in ("scene.js", "anim.js", "kit.js"))]
 
 
 def build_dir(spec: dict) -> Path:
@@ -48,8 +64,8 @@ def segment_path(spec: dict, sid: str) -> Path:
 
 def _key(spec: dict, seg: dict, w: int, h: int) -> str:
     hsh = hashlib.sha256()
-    tpl = template_path(seg["template"])
-    hsh.update(tpl.read_bytes() if tpl.is_file() else b"missing-template")
+    tpl = scene_path(seg)
+    hsh.update(tpl.read_bytes() if tpl.is_file() else b"missing-scene")
     hsh.update(json.dumps(seg.get("data", {}), sort_keys=True, ensure_ascii=False).encode())
     for name, value in sorted(seg.get("assets", {}).items()):
         hsh.update(f"{name}:{value}:".encode())
@@ -58,6 +74,7 @@ def _key(spec: dict, seg: dict, w: int, h: int) -> str:
             st = p.stat()
             hsh.update(f"{st.st_size}:{int(st.st_mtime)}".encode())
     hsh.update(f"{w}x{h}@{spec['video']['fps']}:{float(seg['duration'])}".encode())
+    hsh.update(json.dumps(seg.get("hold") or [], sort_keys=True).encode())
     return hsh.hexdigest()[:16]
 
 
@@ -77,8 +94,9 @@ def prepare_assets(spec: dict, seg: dict, log=print) -> dict:
         if isinstance(value, dict) and value.get("prompt"):
             made = imagegen.resolve_prompt(spec, seg["id"], name, value, log=log)
             assets[name] = made
-    if seg["template"] == "pixel" and "sprite" not in assets and "subject" in assets:
-        cfg = data.get("sprite", {})
+        # Opt-in by data, not by picking a template: a scene that wants a sprite says so.
+        if ("sprite" not in assets) and "subject" in assets and isinstance(data.get("sprite"), dict):
+            cfg = data["sprite"]
         out = build_dir(spec) / "sprites" / f"{seg['id']}.png"
         report = make_sprite(
             assets["subject"], str(out),
@@ -111,9 +129,9 @@ def render_segment(spec: dict, seg: dict, ffmpeg: str, node: str, force: bool = 
     if not force and out.is_file() and keyfile.is_file() and keyfile.read_text().strip() == key:
         return {"segment": seg["id"], "path": str(out), "cached": True}
 
-    tpl = template_path(seg["template"])
+    tpl = scene_path(seg)
     if not tpl.is_file():
-        raise FileNotFoundError(f"template not found for segment '{seg['id']}': {tpl}")
+        raise FileNotFoundError(f"scene not found for segment '{seg['id']}': {tpl}")
 
     if seg.get("data", {}).get("still"):
         # A held shot: render one frame past the entrance animations, then let ffmpeg hold it.
@@ -129,7 +147,7 @@ def render_segment(spec: dict, seg: dict, ffmpeg: str, node: str, force: bool = 
            "--scene", str(tpl), "--out", str(out), "--data", str(data_file),
            "--fps", str(spec["video"]["fps"]), "--duration", str(seg["duration"]),
            "--width", str(w), "--height", str(h), "--ffmpeg", ffmpeg,
-           "--crf", str((spec.get("render") or {}).get("crf", 12))]
+           "--crf", str((spec.get("render") or {}).get("crf", 12))] + hold_args(seg) + runtime_args()
     env = runtime_env()
     proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
                           errors="replace", env=env)
@@ -143,7 +161,7 @@ def render_segment(spec: dict, seg: dict, ffmpeg: str, node: str, force: bool = 
 def _render_still_segment(spec: dict, seg: dict, ffmpeg: str, node: str, out: Path,
                           keyfile: Path, key: str, log=print) -> dict:
     w, h, _ = work_size(spec)
-    tpl = template_path(seg["template"])
+    tpl = scene_path(seg)
     payload = prepare_assets(spec, seg)
     data_file = out.with_suffix(".scene.json")
     data_file.parent.mkdir(parents=True, exist_ok=True)
@@ -154,7 +172,7 @@ def _render_still_segment(spec: dict, seg: dict, ffmpeg: str, node: str, out: Pa
            "--scene", str(tpl), "--out", str(out), "--data", str(data_file),
            "--fps", str(spec["video"]["fps"]), "--duration", str(seg["duration"]),
            "--width", str(w), "--height", str(h), "--ffmpeg", ffmpeg,
-           "--still", str(round(at, 3)), "--still-out", str(still)]
+           "--still", str(round(at, 3)), "--still-out", str(still)] + runtime_args()
     proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
                           errors="replace", env=runtime_env())
     if proc.returncode != 0:
