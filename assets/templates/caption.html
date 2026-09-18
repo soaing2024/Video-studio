@@ -3,139 +3,360 @@
 <head>
 <meta charset="utf-8" />
 <style>
-  html, body { margin: 0; padding: 0; overflow: hidden; background: #06080f; }
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #04060c; }
   #stage { position: absolute; inset: 0; }
+  #particles { position: absolute; inset: 0; }
+  .layer { position: absolute; inset: 0; will-change: transform; }
+  .word { display: inline-block; will-change: transform, opacity; }
 </style>
 </head>
 <body>
-<div id="stage"></div>
+<div id="stage">
+  <canvas id="particles"></canvas>
+  <div class="layer" id="layerBg"></div>
+  <div class="layer" id="layerMid"></div>
+  <div class="layer" id="layerFg"></div>
+  <div class="layer" id="flash"></div>
+</div>
+<script src="../runtime/anim.js"></script>
 <script>
-// caption: explainer / long-form workhorse. One idea per segment: chapter chip, headline,
-// media panel, lower-third narration band, footer.
+// caption: the explainer workhorse, built on the same beat-sheet runtime as kinetic. The panel
+// keeps travelling, the headline swaps mid-shot, bullets transform, and the narration band
+// replaces its own text - so a long segment is never a held slide.
 const S = window.SCENE || {};
+const V = S.visual || {};
+const M = S.motion || {};
+const CH = S.choreography || { beats: [{ t: 0, kind: "establish", intensity: 1 }] };
 const A = S.assets || {};
 const D = S.duration || 8;
+
+const C = Object.assign({
+  bg: "#070a14", surface: "#0e1322", border: "#243049", text: "#f4f7fb", dim: "#9aa8bf",
+  accent: "#e0455f", accent2: "#38bdf8", accent3: "#a78bfa",
+  series: ["#e0455f", "#38bdf8", "#a78bfa", "#4ade80"]
+}, V.colors || {});
+const SHAKE = M.shake || { amp: 1.6, decay: 0.3, freq: 13 };
+const DEPTH = M.depth || { bg: 0.3, mid: 0.75, fg: 1.15 };
+const PARTICLES = M.particles || { count: 20, speed: 20, size: 2, opacity: 0.24, vertical: 8, mode: "dust" };
+const SWEEP = M.sweep || { angle: 0, width: 220, speed: 340, opacity: 0.08 };
+const PULSE = M.pulse || { freq: 1.0, amount: 0.012 };
+const TS = V.type_scale || 1;
+const RADIUS = V.radius === undefined ? 10 : V.radius;
+const TEXTURE = V.texture || "none";
+const TEX_AMOUNT = V.texture_amount || 0.1;
+const VIGNETTE = V.vignette || 0.25;
+const PANEL = V.layout || "panel-right";
+
 const stage = document.getElementById("stage");
-const COL = Object.assign({ bg: "#070a14", text: "#f4f7fb", dim: "#9aa8bf", panel: "#0e1322" }, S.colors || {});
-const accent = S.accent || "#e0455f";
-
-const clamp01 = (x) => Math.min(1, Math.max(0, x));
-const easeOutCubic = (x) => 1 - Math.pow(1 - x, 3);
-const easeInOutCubic = (x) => x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
-
+const cvP = document.getElementById("particles");
+const ctxP = cvP.getContext("2d");
+const layerBg = document.getElementById("layerBg");
+const layerMid = document.getElementById("layerMid");
+const layerFg = document.getElementById("layerFg");
+const flash = document.getElementById("flash");
 const W = () => window.innerWidth, H = () => window.innerHeight;
-let k = 1, L = null, media = null, mediaReady = false;
+const clamp01 = (x) => Math.min(1, Math.max(0, x));
 
-function make(tag, css, text) {
-  const n = document.createElement(tag);
-  Object.assign(n.style, css);
-  if (text !== undefined) n.textContent = text;
-  stage.appendChild(n);
-  return n;
-}
-
-function hexA(hex, a) {
-  const h = hex.replace("#", "");
+function rgba(hex, a) {
+  const h = String(hex).replace("#", "");
   const n = parseInt(h.length === 3 ? h.split("").map(c => c + c).join("") : h, 16);
   return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
 }
+function el(parent, tag, css, text) {
+  const n = document.createElement(tag);
+  Object.assign(n.style, css);
+  if (text !== undefined) n.textContent = text;
+  parent.appendChild(n);
+  return n;
+}
+function textureCss() {
+  const line = rgba(C.border, 0.45);
+  if (TEXTURE === "dots") return { backgroundImage: `radial-gradient(${line} 1px, transparent 1px)`, backgroundSize: "40px 40px" };
+  if (TEXTURE === "grid") return { backgroundImage: `linear-gradient(${line} 1px, transparent 1px), linear-gradient(90deg, ${line} 1px, transparent 1px)`, backgroundSize: "64px 64px" };
+  if (TEXTURE === "scanlines") return { backgroundImage: "repeating-linear-gradient(0deg, rgba(0,0,0,0.42) 0 1px, transparent 1px 4px)" };
+  if (TEXTURE === "grain") return {
+    backgroundImage: "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'>" +
+      "<filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2'/></filter>" +
+      "<rect width='140' height='140' filter='url(%23n)' opacity='0.6'/></svg>\")", backgroundRepeat: "repeat"
+  };
+  return {};
+}
+function splitWords(text) {
+  const parts = String(text || "").split(/(\s+)/).filter(Boolean);
+  if (parts.length >= 2 && String(text).indexOf(" ") !== -1) return parts;
+  const chars = Array.from(String(text || ""));
+  const out = [];
+  for (let i = 0; i < chars.length; i += 2) out.push(chars.slice(i, i + 2).join(""));
+  return out;
+}
+
+let L = null, P = [];
+function seedParticles() {
+  const s = H() / 720;
+  let h = String(S.id || "seed").split("").reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 100000, 7);
+  const rnd = () => { h = (h * 1103515245 + 12345) % 2147483648; return h / 2147483648; };
+  P = Array.from({ length: PARTICLES.count }, () => ({
+    x: rnd() * W(), y: rnd() * H(), r: (0.5 + rnd()) * PARTICLES.size * s,
+    dx: (0.5 + rnd()) * PARTICLES.speed * s, dy: (rnd() - 0.5) * PARTICLES.vertical * s,
+    a: (0.4 + rnd() * 0.8) * PARTICLES.opacity, ph: rnd() * 6.28
+  }));
+}
 
 function build() {
-  k = H() / 720;
-  stage.innerHTML = "";
-  stage.style.background = `linear-gradient(150deg, #0b1120 0%, ${COL.bg} 60%, #04060d 100%)`;
+  const s = H() / 720;
+  [layerBg, layerMid, layerFg, flash].forEach(l => { l.innerHTML = ""; });
+  cvP.width = W(); cvP.height = H();
+  seedParticles();
+  stage.style.background = `linear-gradient(150deg, #0b1120 0%, ${C.bg} 60%, #04060d 100%)`;
 
-  const mediaPanel = make("div", { position: "absolute", right: `${64 * k}px`, top: `${72 * k}px`,
-    width: `${544 * k}px`, height: `${576 * k}px`, borderRadius: `${10 * k}px`,
-    overflow: "hidden", background: COL.panel, opacity: "0" });
-  const mediaInner = make("div", { position: "absolute", inset: "0", backgroundSize: "contain",
-    backgroundRepeat: "no-repeat", backgroundPosition: "center" });
-  mediaPanel.appendChild(mediaInner);
-  const scrim = make("div", { position: "absolute", right: `${64 * k}px`, top: `${72 * k}px`,
-    width: `${544 * k}px`, height: `${576 * k}px`, borderRadius: `${10 * k}px`,
-    background: `linear-gradient(90deg, ${hexA(COL.bg, 0.85)} 0%, ${hexA(COL.bg, 0)} 45%)` });
+  const scene = new Anim.Scene();
+  const beats = CH.beats || [];
+  const first = (kind) => beats.find(b => b.kind === kind) || null;
+  const all = (kind) => beats.filter(b => b.kind === kind);
 
-  const chipLabel = S.chapter
-    ? String(S.chapter.index).padStart(2, "0") + " / " + String(S.chapter.total).padStart(2, "0") +
-      (S.chapter.label ? "   " + S.chapter.label : "")
-    : (S.eyebrow || "");
-  const chip = make("div", { position: "absolute", left: `${72 * k}px`, top: `${72 * k}px`, opacity: "0",
-    padding: `${6 * k}px ${14 * k}px`, border: `${k}px solid ${hexA(accent, 0.7)}`,
-    borderRadius: `${999 * k}px`, fontSize: `${13 * k}px`, letterSpacing: `${2 * k}px`,
-    color: accent }, chipLabel);
+  const tex = el(layerBg, "div", Object.assign({ position: "absolute", inset: "0", opacity: "0" }, textureCss()));
+  const halo = el(layerBg, "div", { position: "absolute", right: `${-80 * s}px`, top: `${-80 * s}px`,
+    width: `${900 * s}px`, height: `${900 * s}px`, opacity: "0", pointerEvents: "none",
+    background: `radial-gradient(closest-side, ${rgba(C.accent, 0.22)}, ${rgba(C.accent, 0)} 70%)` });
+  const sweep = el(layerBg, "div", { position: "absolute", top: `${-40 * s}%`, height: `${180 * s}%`,
+    width: `${SWEEP.width * s}px`, opacity: "0", pointerEvents: "none",
+    background: `linear-gradient(90deg, ${rgba(C.text, 0)}, ${rgba(C.text, SWEEP.opacity)}, ${rgba(C.text, 0)})`,
+    filter: `blur(${20 * s}px)`, transform: `rotate(${SWEEP.angle}deg)` });
+  const vign = el(layerBg, "div", { position: "absolute", inset: "0", opacity: "0", pointerEvents: "none",
+    background: `radial-gradient(78% 78% at 50% 46%, rgba(0,0,0,0) 42%, rgba(0,0,0,${VIGNETTE}) 100%)` });
 
-  const title = make("div", { position: "absolute", left: `${72 * k}px`, top: `${150 * k}px`,
-    width: `${520 * k}px`, opacity: "0", fontSize: `${(S.titleSize || 46) * k}px`,
-    lineHeight: "1.22", fontWeight: "500", color: COL.text, letterSpacing: `${k}px` },
-    S.title || "");
+  // ---- media panel: keeps moving (pan + zoom + reveal) ----
+  const onLeft = PANEL === "panel-left";
+  const pad = 64 * s;
+  const pw = (PANEL === "full-bleed" ? W() - 2 * pad : 544 * s);
+  const ph = (PANEL === "full-bleed" ? H() - 2 * pad : 576 * s);
+  const panel = el(layerMid, "div", { position: "absolute", top: `${PANEL === "full-bleed" ? pad : 72 * s}px`,
+    left: onLeft ? `${pad}px` : `${W() - pw - pad}px`, width: `${pw}px`, height: `${ph}px`,
+    borderRadius: `${RADIUS * s}px`, overflow: "hidden", background: C.surface, opacity: "0",
+    backgroundSize: "cover", backgroundRepeat: "no-repeat", backgroundPosition: "center" });
+  const scrim = el(layerMid, "div", { position: "absolute", inset: "0", opacity: "0", pointerEvents: "none",
+    background: PANEL === "full-bleed"
+      ? "linear-gradient(90deg, rgba(4,6,12,0.92) 0%, rgba(4,6,12,0.55) 45%, rgba(4,6,12,0.2) 100%)"
+      : `linear-gradient(${onLeft ? 270 : 90}deg, ${rgba(C.bg, 0.85)} 0%, ${rgba(C.bg, 0)} 45%)` });
+  const panelA = scene.actor(panel, { opacity: 0, scale: 1.06, y: 30, clip: 0 });
+  const scrimA = scene.actor(scrim, { opacity: 0 });
 
-  const sub = make("div", { position: "absolute", left: `${74 * k}px`, top: `${316 * k}px`,
-    width: `${470 * k}px`, opacity: "0", fontSize: `${19 * k}px`, lineHeight: "1.5",
-    color: COL.dim }, S.subtitle || "");
+  // ---- text column ----
+  const colX = onLeft ? `${pad + pw + 40 * s}px` : `${pad}px`;
+  const colW = PANEL === "full-bleed" ? 560 * s : (W() - pw - 3 * pad) > 0 ? W() - pw - 3 * pad : 520 * s;
+  const chip = el(layerFg, "div", { position: "absolute", left: colX, top: `${72 * s}px`, opacity: "0",
+    padding: `${6 * s}px ${14 * s}px`, border: `${s}px solid ${rgba(C.accent, 0.7)}`,
+    borderRadius: `${999 * s}px`, fontSize: `${13 * s}px`, letterSpacing: `${2 * s}px`, color: C.accent },
+    S.chapter ? String(S.chapter.index).padStart(2, "0") + " / " + String(S.chapter.total).padStart(2, "0") +
+      (S.chapter.label ? "   " + S.chapter.label : "") : (S.eyebrow || ""));
 
-  const bulletsTop = (S.subtitle ? 400 : 330);
+  const titleBox = el(layerFg, "div", { position: "absolute", left: colX, top: `${150 * s}px`,
+    width: `${colW}px`, fontSize: `${(S.titleSize || 44) * TS * s}px`, lineHeight: "1.22",
+    fontWeight: "500", color: C.text });
+  const altBox = S.titleAlt ? el(layerFg, "div", { position: "absolute", left: colX, top: `${150 * s}px`,
+    width: `${colW}px`, fontSize: `${(S.titleSize || 44) * TS * s}px`, lineHeight: "1.22",
+    fontWeight: "500", color: C.accent, opacity: "0" }) : null;
+  const wordActors = splitWords(S.title).map((piece) => {
+    const span = document.createElement("span");
+    span.className = "word";
+    span.textContent = piece;
+    titleBox.appendChild(span);
+    return { actor: scene.actor(span, { opacity: 0, y: 52, blur: 8 }) };
+  });
+  const altActors = altBox ? splitWords(S.titleAlt).map((piece) => {
+    const span = document.createElement("span");
+    span.className = "word";
+    span.textContent = piece;
+    altBox.appendChild(span);
+    return { actor: scene.actor(span, { opacity: 0, y: 44, blur: 6 }) };
+  }) : [];
+
+  const bulletTop = 300;
   const bullets = (S.rows || []).slice(0, 4).map((r, i) => {
-    const row = make("div", { position: "absolute", left: `${74 * k}px`,
-      top: `${bulletsTop + i * 46}px`, opacity: "0", display: "flex",
-      alignItems: "baseline", gap: `${12 * k}px` });
-    row.appendChild(make("div", { width: `${8 * k}px`, height: `${8 * k}px`,
-      background: r.color || accent, borderRadius: `${2 * k}px`, flex: "0 0 auto" }));
-    row.appendChild(make("div", { fontSize: `${17 * k}px`, color: COL.text }, r.value || r.label || ""));
-    return row;
+    const row = el(layerFg, "div", { position: "absolute", left: colX, top: `${(bulletTop + i * 46) * s}px`,
+      opacity: "0", display: "flex", alignItems: "baseline", gap: `${12 * s}px` });
+    const dot = el(row, "div", { width: `${8 * s}px`, height: `${8 * s}px`, background: r.color || C.series[i % 4],
+      borderRadius: `${2 * s}px`, flex: "0 0 auto" });
+    const txt = el(row, "div", { fontSize: `${17 * s}px`, color: C.text }, r.value || r.label || "");
+    return { actor: scene.actor(row, { opacity: 0, x: -30 }), dot: scene.actor(dot, { scale: 0.4, opacity: 0 }),
+             node: row, text: txt, value: r.value || r.label || "", i };
   });
 
-  const band = make("div", { position: "absolute", left: `${64 * k}px`, right: `${64 * k}px`,
-    bottom: `${48 * k}px`, minHeight: `${86 * k}px`, background: hexA("#04060d", 0.72),
-    borderLeft: `${3 * k}px solid ${accent}`, borderRadius: `${6 * k}px`,
-    padding: `${16 * k}px ${22 * k}px`, opacity: "0" });
-  const caption = make("div", { fontSize: `${24 * k}px`, lineHeight: "1.45", color: COL.text },
-    S.caption || "");
-  band.appendChild(caption);
+  const band = el(layerFg, "div", { position: "absolute", left: `${pad}px`, right: `${pad}px`,
+    bottom: `${44 * s}px`, minHeight: `${84 * s}px`, background: rgba("#04060d", 0.72),
+    borderLeft: `${3 * s}px solid ${C.accent}`, borderRadius: `${6 * s}px`,
+    padding: `${14 * s}px ${20 * s}px`, opacity: "0" });
+  const bandText = el(band, "div", { fontSize: `${23 * s}px`, lineHeight: "1.4", color: C.text },
+    S.caption || S.subtitle || "");
+  const bandA = scene.actor(band, { opacity: 0, y: 26 });
+  const bandTextA = scene.actor(bandText, { opacity: 1, y: 0, blur: 0 });
 
-  const footer = make("div", { position: "absolute", right: `${72 * k}px`, bottom: `${16 * k}px`,
-    fontSize: `${12 * k}px`, letterSpacing: `${k}px`, color: "#5d6b83", opacity: "0" },
-    S.footer || "");
+  const footer = el(layerFg, "div", { position: "absolute", right: `${pad}px`, bottom: `${14 * s}px`,
+    fontSize: `${12 * s}px`, color: "#5d6b83", opacity: "0" }, S.footer || "");
+  const footerA = scene.actor(footer, { opacity: 0 });
 
-  return { mediaPanel, mediaInner, scrim, chip, title, sub, bullets, band, footer };
+  const gauge = el(layerFg, "div", { position: "absolute", left: `${pad}px`, bottom: `${18 * s}px`,
+    height: `${3 * s}px`, width: "0px", background: C.accent, opacity: "0.8",
+    boxShadow: `0 0 ${14 * s}px ${rgba(C.accent, 0.6)}` });
+  const gaugeA = scene.actor(gauge, { width: 0, opacity: 0 });
+
+  let camActor = new Anim.Actor(document.createElement("div"), { x: 0, y: 0, scale: 1, rot: 0, opacity: 1 });
+  const track = (M.camera_track && M.camera_track.length) ? M.camera_track : null;
+  if (track) {
+    for (const wp of track) {
+      camActor.to({ x: wp.x, y: wp.y, scale: wp.scale, rot: wp.rot },
+                  { at: wp.t, dur: wp.dur, ease: wp.ease, arc: wp.arc, spring: 0.3, damping: 0.8 });
+    }
+  }
+  const camLayers = [{ node: layerBg, depth: DEPTH.bg }, { node: layerMid, depth: DEPTH.mid },
+                     { node: layerFg, depth: DEPTH.fg }];
+  const camHits = all("emphasis").map(b => b.t);
+
+  // ------------------------------- choreography --------------------------------------
+  const est = first("establish") || { t: 0, intensity: 1 };
+  wordActors.forEach((w, i) => w.actor.to({ opacity: 1, y: 0, blur: 0 },
+      { at: est.t + 0.15 + i * 0.07, dur: 0.75, ease: "back", arc: 10, anticipation: 0.15 }));
+  const chipA = scene.actor(chip, { opacity: 0, y: -12 });
+  chipA.to({ opacity: 1, y: 0 },
+      { at: est.t + 0.1, dur: 0.5, ease: "out" });
+  panelA.to({ opacity: 1, scale: 1, y: 0, clip: 1 },
+            { at: est.t + 0.25, dur: 1.2, ease: "out", arc: 22 });
+  scrimA.to({ opacity: 1 }, { at: est.t + 0.5, dur: 0.9, ease: "out" });
+  bandA.to({ opacity: 1, y: 0 }, { at: est.t + 0.6, dur: 0.7, spring: 0.5, damping: 0.7 });
+  gaugeA.to({ opacity: 0.8, width: (W() - 2 * pad) * 0.18 }, { at: est.t + 0.7, dur: 0.9, ease: "out" });
+  footerA.to({ opacity: 0.9 }, { at: est.t + 1.0, dur: 0.6 });
+
+  const texts = [S.caption || S.subtitle || ""].concat(S.captionVariants || []);
+  let textIdx = 0;
+
+  beats.filter(b => !["establish", "exit"].includes(b.kind)).forEach((b, n) => {
+    const I = b.intensity || 1;
+    if (b.kind === "build") {
+      bullets.forEach((bl, i) => {
+        bl.actor.to({ opacity: 1, x: 0 }, { at: b.t + i * 0.09, dur: 0.55, ease: "out", anticipation: 0.12 });
+        bl.dot.to({ scale: 1, opacity: 1 }, { at: b.t + i * 0.09 + 0.05, dur: 0.4, spring: 0.9, damping: 0.45 });
+      });
+    } else if (b.kind === "swap" && altActors.length) {
+      wordActors.forEach((w, i) => w.actor.to({ opacity: 0, y: -34, blur: 6 },
+            { at: b.t + i * 0.03, dur: 0.3, ease: "in" }));
+      altActors.forEach((w, i) => w.actor.to({ opacity: 1, y: 0, blur: 0 },
+            { at: b.t + 0.16 + i * 0.06, dur: 0.6, spring: 0.6, damping: 0.6, arc: -10 }));
+    } else if (b.kind === "transform") {
+      panelA.to({ scale: 1 + 0.05 * I, x: (n % 2 ? 1 : -1) * 16 * I },
+                { at: b.t, dur: 1.5, ease: "inout", arc: 26 });
+      bullets.forEach((bl, i) => bl.actor.to({ x: (n % 2 ? 12 : -12) }, { at: b.t + i * 0.05, dur: 1.2, ease: "inout" }));
+      bullets.forEach(bl => bl.actor.to({ x: 0 }, { at: b.t + 1.5, dur: 0.6, ease: "out" }));
+    } else if (b.kind === "reveal") {
+      panelA.to({ clip: 0 }, { at: b.t, dur: 0.7, ease: "inout" });
+      panelA.to({ clip: 1 }, { at: b.t + 0.7, dur: 0.6, ease: "out" });
+    } else if (b.kind === "emphasis") {
+      gaugeA.to({ opacity: 1, width: (W() - 2 * pad) * Math.min(0.95, 0.25 + 0.2 * (n + 1)) },
+                { at: b.t, dur: 0.5, spring: 0.7, damping: 0.4 });
+      panelA.to({ scale: 1.03 * I }, { at: b.t, dur: 0.45, ease: "back" });
+      bullets.forEach((bl, i) => bl.dot.to({ scale: 1.5 }, { at: b.t + i * 0.04, dur: 0.4, spring: 0.9, damping: 0.35 }));
+    } else if (b.kind === "parallax_drift") {
+      panelA.to({ x: (n % 2 ? -22 : 22), y: -8 }, { at: b.t, dur: 1.8, ease: "inout", arc: 24 });
+    } else if (b.kind === "count") {
+      bullets.forEach((bl, i) => bl.actor.to({ x: (i % 2 ? 10 : -10) }, { at: b.t, dur: 0.45, ease: "out" }));
+      bullets.forEach(bl => bl.actor.to({ x: 0 }, { at: b.t + 0.6, dur: 0.5, ease: "out" }));
+    } else if (b.kind === "shuffle") {
+      bullets.forEach((bl, i) => {
+        const to = bullets.length > 1 ? ((i + 1) % bullets.length) : i;
+        bl.actor.to({ y: (to - i) * 46 * s, x: 8 }, { at: b.t, dur: 0.8, ease: "back", arc: 30 });
+      });
+      bullets.forEach(bl => bl.actor.to({ y: 0, x: 0 }, { at: b.t + 1.4, dur: 0.6, ease: "out" }));
+    }
+
+    // the narration band replaces its own text - a strong "this is not a slide" signal
+    const swapText = all("transform").concat(all("emphasis")).findIndex(x => x === b);
+    if (texts.length > 1 && (b.kind === "transform" || b.kind === "emphasis" || b.kind === "count")) {
+      textIdx = Math.min(texts.length - 1, textIdx + 1);
+      bandTextA.to({ opacity: 0, y: -18, blur: 6 }, { at: b.t, dur: 0.25, ease: "in" });
+      bandTextA.to({ opacity: 1, y: 0, blur: 0 }, { at: b.t + 0.28, dur: 0.45, ease: "out" });
+      band.textContent = "";
+      band.appendChild(bandText);
+      bandText.textContent = texts[textIdx];
+    }
+  });
+
+  const ex = first("exit");
+  if (ex) {
+    wordActors.forEach(w => w.actor.to({ y: -10 }, { at: ex.t, dur: 0.4, ease: "in" }));
+    panelA.to({ scale: 1.01 }, { at: ex.t, dur: 0.4, ease: "in" });
+    bandA.to({ y: 10 }, { at: ex.t, dur: 0.4, ease: "in" });
+  }
+
+  return { s, scene, tex, halo, sweep, vign, panel, plate: panel, camActor, camLayers, camHits,
+           chipA, band, bandText };
 }
 
 L = build();
 window.addEventListener("resize", () => { L = build(); });
 
-if (A.subject) {
-  media = new Image();
-  media.onload = () => { mediaReady = true; window.__sceneReady = true; };
-  media.onerror = () => { mediaReady = true; window.__sceneReady = true; };
-  media.src = A.subject;
+let subject = null, subjectReady = false;
+const panelBg = (L && L.panel) || null;
+function wish() { return A.subject; }
+const img = wish() ? new Image() : null;
+if (img) {
+  img.onload = () => { subjectReady = true; window.__sceneReady = true; };
+  img.onerror = () => { subjectReady = true; window.__sceneReady = true; };
+  img.src = A.subject;
 } else {
   window.__sceneReady = true;
 }
 
 window.seek = (t) => {
-  const fadeOut = 1 - easeOutCubic(clamp01((t - (D - 0.5)) / 0.5));
-  if (mediaReady && media) L.mediaInner.style.backgroundImage = `url("${media.src}")`;
+  const s = L.s;
+  const fadeOut = 1 - Anim.EASE.out(clamp01((t - (D - 0.4)) / 0.4));
 
-  const zoom = 1 + 0.05 * easeInOutCubic(clamp01(t / Math.max(1, D)));
-  L.mediaPanel.style.opacity = (easeOutCubic(clamp01((t - 0.15) / 0.5)) * fadeOut).toFixed(4);
-  L.mediaPanel.style.transform = `scale(${zoom.toFixed(4)})`;
-  L.scrim.style.opacity = (easeOutCubic(clamp01((t - 0.15) / 0.6)) * fadeOut).toFixed(4);
+  if (subjectReady && img && L.panel && !L.panel.style.backgroundImage) {
+    L.panel.style.backgroundImage = `url("${img.src}")`;
+  }
 
-  L.chip.style.opacity = (easeOutCubic(clamp01((t - 0.2) / 0.45)) * fadeOut).toFixed(4);
-  const pt = clamp01((t - 0.35) / 0.5);
-  L.title.style.opacity = (easeOutCubic(pt) * fadeOut).toFixed(4);
-  L.title.style.transform = `translateY(${((1 - easeOutCubic(pt)) * 18 * k).toFixed(2)}px)`;
-  L.sub.style.opacity = (easeOutCubic(clamp01((t - 0.65) / 0.5)) * fadeOut).toFixed(4);
+  const cam = L.camActor.sample(t);
+  let bump = 0;
+  for (const h of L.camHits) {
+    if (t <= h) continue;
+    const k = (t - h) / SHAKE.decay;
+    if (k < 1) bump += Math.exp(-3.2 * k);
+  }
+  bump = Math.min(2.2, bump);
+  const sx = Math.sin(t * SHAKE.freq) * SHAKE.amp * bump;
+  const sy = Math.cos(t * SHAKE.freq * 1.3) * SHAKE.amp * 0.6 * bump;
+  const camScale = (cam.scale || 1) * (1 + 0.018 * bump);
+  for (const lay of L.camLayers) {
+    const d = lay.depth;
+    lay.node.style.transform =
+      `translate3d(${((cam.x || 0) * d + sx).toFixed(2)}px, ${((cam.y || 0) * d + sy).toFixed(2)}px, 0) ` +
+      `scale(${(1 + (camScale - 1) * d).toFixed(5)}) rotate(${((cam.rot || 0) * d).toFixed(3)}deg)`;
+  }
+  L.scene.seek(t, null);
 
-  L.bullets.forEach((row, i) => {
-    const p = clamp01((t - (0.9 + i * 0.18)) / 0.45);
-    row.style.opacity = (easeOutCubic(p) * fadeOut).toFixed(4);
-    row.style.transform = `translateX(${((1 - easeOutCubic(p)) * -12 * k).toFixed(2)}px)`;
-  });
+  L.tex.style.opacity = (Math.min(0.8, TEX_AMOUNT * 3) * Anim.EASE.out(clamp01(t / 1.0))).toFixed(4);
+  L.vign.style.opacity = (Anim.EASE.out(clamp01(t / 1.3)) * fadeOut).toFixed(4);
+  L.halo.style.opacity = (0.5 * (1 + PULSE.amount * Math.sin(t * PULSE.freq * 6.283)) *
+                          Anim.EASE.out(clamp01(t / 1.2)) * fadeOut).toFixed(4);
+  const sw = ((t * SWEEP.speed) % (W() * 2.2)) - W() * 1.1;
+  L.sweep.style.left = `${sw.toFixed(1)}px`;
+  L.sweep.style.opacity = (SWEEP.opacity * 4 * fadeOut).toFixed(4);
 
-  const pb = clamp01((t - 1.15) / 0.55);
-  L.band.style.opacity = (easeOutCubic(pb) * fadeOut).toFixed(4);
-  L.band.style.transform = `translateY(${((1 - easeOutCubic(pb)) * 20 * k).toFixed(2)}px)`;
-  L.footer.style.opacity = (0.9 * easeOutCubic(clamp01((t - 0.8) / 0.5)) * fadeOut).toFixed(4);
+  flash.style.background = `radial-gradient(120% 120% at 50% 50%, ${rgba(C.accent, 0.4)}, ${rgba(C.accent, 0)} 60%)`;
+  flash.style.opacity = (Math.min(0.35, bump * 0.26) * fadeOut).toFixed(4);
+  flash.style.mixBlendMode = "screen";
+
+  ctxP.setTransform(1, 0, 0, 1, 0, 0);
+  ctxP.clearRect(0, 0, cvP.width, cvP.height);
+  ctxP.globalAlpha = fadeOut;
+  for (const q of P) {
+    const x = (q.x + q.dx * t) % (W() + 40) - 20;
+    const y = (q.y + q.dy * t + 8 * Math.sin(t * 0.6 + q.ph)) % (H() + 40) - 20;
+    ctxP.fillStyle = rgba(C.text, q.a * (0.6 + 0.4 * Math.sin(t * 1.5 + q.ph)));
+    ctxP.beginPath(); ctxP.arc(x, y, q.r, 0, 6.283); ctxP.fill();
+  }
+  ctxP.globalAlpha = 1;
+
+  L.chipA.node.style.opacity = (parseFloat(L.chipA.node.style.opacity || "1") * fadeOut).toFixed(4);
+  L.band.style.borderLeftColor = C.accent;
 };
 
 window.seek(0);

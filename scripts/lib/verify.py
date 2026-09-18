@@ -37,6 +37,25 @@ class Verifier:
             attempt -= 0.1
         raise RuntimeError(f"could not extract a frame near {t:.2f}s from {path}")
 
+    def _motion_profile(self, video: str, fps: float = 6.0) -> list[float]:
+        """Frame-to-frame change across the whole video, in 0-255 grey levels.
+
+        This is the slideshow detector: a shot that enters and then holds still shows up as a
+        long run of near-zero differences, however nice the layout is.
+        """
+        import numpy as np
+        proc = subprocess.run([self.ffmpeg, "-v", "error", "-i", video,
+                              "-vf", f"fps={fps},scale=192:108", "-f", "rawvideo",
+                              "-pix_fmt", "gray", "-"], capture_output=True)
+        buf = np.frombuffer(proc.stdout, dtype=np.uint8)
+        frame = 192 * 108
+        n = buf.size // frame
+        if n < 3:
+            return []
+        frames = buf[:n * frame].reshape(n, 108, 192).astype(np.int16)
+        return np.abs(np.diff(frames, axis=0)).mean(axis=(1, 2)).tolist()
+
+
     def _tail_frames(self, path: str, seconds: float, tmp: Path) -> list[float]:
         """Mean luma of the last few frames, decoded as a run so no seek can overshoot."""
         import numpy as np
@@ -124,6 +143,29 @@ class Verifier:
                          f"mean error when re-quantising to {want} colours: {qerr}")
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+        # The slideshow check: a shot that enters and holds shows up as long runs of near-zero
+        # frame-to-frame change, however good the layout is.
+        motion_profile = self._motion_profile(video)
+        if motion_profile:
+            ordered_m = sorted(motion_profile)
+            mean_motion = sum(motion_profile) / len(motion_profile)
+            frozen = sum(1 for d in motion_profile if d < 1.0) / len(motion_profile)
+            p90_motion = ordered_m[int(len(ordered_m) * 0.9)]
+            # Held shots are a deliberate cost choice, not a defect, so the budget grows with the
+            # share of runtime the project declares static. Unintended stillness still fails.
+            total_len = specmod.planned_duration(spec) or 1.0
+            still_len = 0.0
+            seg_map = specmod.segment_map(spec)
+            for item in spec.get("timeline", []):
+                seg = seg_map.get(item.get("segment"))
+                if seg and (seg.get("data") or {}).get("still"):
+                    still_len += specmod.item_length(spec, item)
+            budget = min(0.7, 0.32 + 0.75 * (still_len / total_len))
+            self.add("motion", mean_motion >= 1.5 and frozen <= budget,
+                     f"mean change {mean_motion:.2f}/255, p90 {p90_motion:.2f}, "
+                     f"frozen intervals {frozen * 100:.0f}% (budget {budget * 100:.0f}%: "
+                     f"{still_len:.1f}s of {total_len:.1f}s declared static)")
 
         tracks = (spec.get("audio") or {}).get("tracks", [])
         if tracks:

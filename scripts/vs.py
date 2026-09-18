@@ -34,8 +34,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 from lib import (  # noqa: E402
-    assemble, beats, brief as brief_mod, imagegen, montage, narrate, probe, render,
-    runtime, sprite, spec as specmod, style, tts, verify,
+    assemble, beats, brief as brief_mod, choreography, imagegen, montage, motion,
+    narrate, probe, render, runtime, sprite, spec as specmod, style, tts, verify,
 )
 
 SKILL = runtime.SKILL_DIR
@@ -61,7 +61,6 @@ def load_spec(path, want_narration: bool = True, seed: int | None = None) -> dic
     spec = specmod.load(path)
     if seed is not None:
         spec.setdefault("style", {})["seed"] = int(seed)
-    style.inject(spec)
     cfg = spec.setdefault("narration", {})
     if not cfg.get("lines"):
         manifest = render.build_dir(spec) / "voice" / "narration.json"
@@ -74,8 +73,12 @@ def load_spec(path, want_narration: bool = True, seed: int | None = None) -> dic
                 cfg["lines"] = [{"segment": l["segment"], "text": l["text"]}
                                  for l in data["lines"] if l.get("text")]
                 cfg.setdefault("voice", data.get("voice"))
+    # narration settles the real durations, so it has to run before anything plans against them
     if want_narration and narrate.configured(spec):
         narrate.apply(spec, _ffmpeg(), log=lambda m: print(m, file=sys.stderr))
+    style.inject(spec)
+    motion.inject(spec)
+    choreography.inject(spec)
     return spec
 
 
@@ -429,6 +432,7 @@ def cmd_plan(args) -> int:
                              "minutes": round(seconds / 60, 1)},
         "output": str(Path(spec["base_dir"]) / (spec["name"] + ".mp4")),
         "style": style.report(spec),
+        "choreography": choreography.report(spec),
         "issues": issues,
         "ok": not errors,
     })
