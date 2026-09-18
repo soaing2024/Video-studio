@@ -53,6 +53,8 @@ function build() {
   const kit = Kit.buildStage(stage, {});
   particles = Kit.seedParticles(PARTICLES, S.id || "stat", W(), H());
   scene = new Anim.Scene();
+  // Perpetual motion for every actor made from here on, so no two frames of the shot match.
+  scene.driftDefaults(M.drift || {}, S.id || "stat");
 
   const tex = Kit.el(kit.layerBg, "div", Object.assign({ position: "absolute", inset: "0", opacity: "0" },
                                                        Kit.textureCss(TEX, C.border, TEX_AMOUNT)));
@@ -73,7 +75,9 @@ function build() {
                                        seed: (S.id || "stat") + "-bg" });
 
   const centered = (V.layout || "center") !== "offset";
-  const baseX = centered ? 0 : -140 * s;
+// Half the old offset: the text stack is 1000 units wide, so shifting it 140 put its left edge
+// hard against the frame and any camera drift clipped it.
+const baseX = centered ? 0 : -64 * s;
   const ringSize = 430 * s;
   const ring = Kit.el(kit.layerMid, "div", { position: "absolute", left: "50%", top: `${44 * s}%`,
     width: `${ringSize}px`, height: `${ringSize}px`, marginLeft: `${-ringSize / 2 + baseX}px`,
@@ -153,9 +157,12 @@ function build() {
   ringA.to({ opacity: 1, scale: 1, rot: 40 }, { at: est.t + 0.35, dur: 1.4, ease: "out", arc: 30 });
   dotA.to({ opacity: 1, scale: 1 }, { at: est.t + 0.5, dur: 0.6, spring: 0.9, damping: 0.45 });
 
+  // The label and subtitle belong to the shot, not to one beat: revealing them only on a build
+  // beat left both invisible for the whole shot whenever the beat sheet had no build.
+  labelA.to({ opacity: 1, y: 0 }, { at: est.t + 1.0, dur: 0.55, ease: "out", anticipation: 0.12 });
+  subA.to({ opacity: 1, y: 0 }, { at: est.t + 1.2, dur: 0.55, ease: "out" });
+
   (at("build") ? [at("build")] : []).forEach(b => {
-    labelA.to({ opacity: 1, y: 0 }, { at: b.t, dur: 0.55, ease: "out", anticipation: 0.12 });
-    subA.to({ opacity: 1, y: 0 }, { at: b.t + 0.18, dur: 0.55, ease: "out" });
     ringA.to({ rot: 190 }, { at: b.t, dur: 1.6, ease: "inout", arc: 24 });
   });
 
@@ -224,7 +231,8 @@ window.seek = (t) => {
                       pulseAmount: (M.pulse && M.pulse.amount) || 0.012,
                       pulseFreq: (M.pulse && M.pulse.freq) || 1,
                       sweepSpeed: (M.sweep && M.sweep.speed) || 360,
-                      sweepOpacity: (M.sweep && M.sweep.opacity) || 0.1 });
+                      sweepOpacity: (M.sweep && M.sweep.opacity) || 0.1,
+                      cuts: M.cuts || [] });
   Kit.drawParticles(L.kit.ctx, L.particles, t, C.text, W(), H());
 
   // the value keeps a small odometer shudder so even between beats it is not a still image

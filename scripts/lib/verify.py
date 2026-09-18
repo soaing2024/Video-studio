@@ -180,6 +180,15 @@ class Verifier:
                      f"per frame {micro:.2f}, frozen intervals {frozen * 100:.0f}% "
                      f"(budget {budget * 100:.0f}%: {still_len:.1f}s of {total_len:.1f}s static)")
 
+            # The gate a slideshow cannot pass. Frames identical to the one before them are what an
+            # eye reads as a still image, and a beat sheet full of short moves separated by long
+            # gaps still produces plenty of them. The budget grows with the share of runtime the
+            # project explicitly declares static, so a deliberate title card is allowed and an
+            # accidental hold is not.
+            self.add("alive", frozen <= budget,
+                     f"frozen intervals {frozen * 100:.0f}% (budget {budget * 100:.0f}%: "
+                     f"{still_len:.1f}s of {total_len:.1f}s declared static)")
+
         tracks = (spec.get("audio") or {}).get("tracks", [])
         if tracks:
             loud = probe.loudness(ffmpeg, video)

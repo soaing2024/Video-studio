@@ -88,13 +88,23 @@ const code = await new Promise((resolve) => ff.on("close", resolve));
 // Layout audit: the failures that pixels alone do not reveal - a template that never renders its
 // actors, text that sits off-frame after the camera drifts, blocks that overlap, and a page that
 // never declared a font and therefore renders Times New Roman.
-// Sample near the end: every beat has fired by then, so "still invisible" really means never
-// visible rather than "not yet arrived".
-const auditAt = Math.min(Math.max(2.6, duration * 0.85), Math.max(2.6, duration - 0.35));
+//
+// Five instants, not two. The camera and the beat sheet move content a long way now, so a block
+// that sits comfortably inside the frame at one moment can cross the edge half a second later.
+// An audit that samples twice reports "clean" for a shot that visibly clips its own headline.
+const sampleTimes = [];
+// The first second is excluded on purpose: an element that slides or wipes in is supposed to be
+// outside the frame while it does. Judging that as a layout bug would make the check useless.
+// The entrance is excluded on purpose: an element that slides or wipes in is supposed to be
+// outside the frame while it does. Judging that as a layout bug would make the check useless.
+// Entrances are staggered and some are still arriving two seconds in (a card that slides in on a
+// late beat, a window that lands at 1.4s), so the samples start after the shot has composed
+// itself. Sampling any earlier reports deliberate motion as a layout bug.
+const sampleStart = Math.min(2.5, Math.max(1.2, duration * 0.25));
+const sampleSpan = Math.max(0.1, duration - sampleStart - 0.35);
+for (let i = 0; i < 5; i++) sampleTimes.push(+(sampleStart + sampleSpan * (i / 4)).toFixed(3));
 let audit = null;
 try {
-  await page.evaluate((tt) => window.seek(tt), auditAt);
-  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r())));
   const runAudit = (tt) => page.evaluate((tt) => {
     const vw = window.innerWidth, vh = window.innerHeight;
     const effOpacity = (n) => {
@@ -120,19 +130,35 @@ try {
       // otherwise be reported as overlapping its neighbours.
       let lx = 0, ly = 0;
       for (let n = el; n; n = n.offsetParent) { lx += n.offsetLeft; ly += n.offsetTop; }
+      // Decorative layers (the travelling ghost word, deliberate bleeds) are meant to cross the
+      // frame, so they count for ink but are exempt from the off-frame and overlap tests.
+      let decor = false;
+      for (let n = el; n; n = n.parentElement) {
+        if (n.dataset && n.dataset.decor === "1") { decor = true; break; }
+      }
       texts.push({ name: label(el), opacity: +effOpacity(el).toFixed(3),
+                    decor,
                     x: Math.round(lx), y: Math.round(ly),
                     w: el.offsetWidth, h: el.offsetHeight,
                     cx: Math.round(r.left + r.width / 2), cy: Math.round(r.top + r.height / 2),
+                    rect: { left: r.left, right: r.right, top: r.top, bottom: r.bottom },
                     size: parseFloat(cs.fontSize) });
     });
     const visible = texts.filter((t) => t.opacity > 0.05 && t.w > 0 && t.h > 0);
-    const invisible = texts.filter((t) => t.opacity <= 0.05);
+    // Decorative nodes are excluded here too: a ghost word that sits at 4% opacity is the design,
+    // not a node that failed to render.
+    const invisible = texts.filter((t) => !t.decor && t.opacity <= 0.05);
     // overlays and decorative bleeds are deliberate, so off-frame and overlap checks only judge
     // elements that read as primary content - i.e. actually opaque.
-    const primary = visible.filter((t) => t.opacity > 0.6);
-    // a transformed element is off-frame when its visible centre leaves the viewport
-    const offscreen = primary.filter((t) => t.cx < 0 || t.cy < 0 || t.cx > vw || t.cy > vh);
+    const primary = visible.filter((t) => t.opacity > 0.6 && !t.decor);
+    // Off-frame when the visible centre leaves the viewport, or when an opaque text block crosses a
+    // side edge - which is what actually cuts a headline in half. Only the horizontal edges are
+    // judged tightly: a rotation inflates a wide element's bounding rect vertically, so the same
+    // test on top and bottom would report the camera's own tilt as a layout bug.
+    const bleedOf = (t) => Math.max(0, -t.rect.left, t.rect.right - vw);
+    const offscreen = primary.filter((t) => t.cx < 0 || t.cy < 0 || t.cx > vw || t.cy > vh ||
+                                            bleedOf(t) > 4);
+    const bleed = primary.reduce((m, t) => Math.max(m, bleedOf(t)), 0);
     const overlaps = [];
     for (let i = 0; i < primary.length; i++) {
       for (let j = i + 1; j < primary.length; j++) {
@@ -151,17 +177,29 @@ try {
              invisibleSamples: invisible.slice(0, 6).map((t) => t.name),
              invisibleNames: invisible.map((t) => t.name),
              offscreen: offscreen.length, offscreenSamples: offscreen.slice(0, 6).map((t) => t.name),
+             bleed: Math.round(bleed),
              overlaps: overlaps.length, overlapSamples: overlaps.slice(0, 4) };
   }, tt);
 
-  // Two instants, intersected: something still invisible late in the shot is broken; something
-  // that has simply not arrived yet at the first sample is not.
-  const first = await runAudit(auditAt);
-  const late = await runAudit(Math.max(2.8, duration - 0.6));
-  const common = (first.invisibleNames || []).filter((n) => (late.invisibleNames || []).includes(n));
-  audit = Object.assign({}, late, { invisible: common.length,
-                                  invisibleSamples: common.slice(0, 6),
-                                  sampledAt: [auditAt, Math.max(2.8, duration - 0.6)] });
+  // Aggregate. Invisible means invisible at every instant - a node that has simply not arrived yet
+  // is not broken. Off-frame means off-frame at any instant, because a clip that lasts half a
+  // second is still a clip.
+  const reports = [];
+  for (const tt of sampleTimes) {
+    await page.evaluate((x) => window.seek(x), tt);
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r())));
+    reports.push(await runAudit(tt));
+  }
+  const worstOff = reports.reduce((a, r) => (r.offscreen > a.offscreen ? r : a), reports[0]);
+  const worstOverlap = reports.reduce((a, r) => (r.overlaps > a.overlaps ? r : a), reports[0]);
+  const invisible = reports[0].invisibleNames.filter(
+    (n) => reports.every((r) => r.invisibleNames.includes(n)));
+  audit = Object.assign({}, reports[reports.length - 1], {
+    invisible: invisible.length, invisibleSamples: invisible.slice(0, 6),
+    offscreen: worstOff.offscreen, offscreenSamples: worstOff.offscreenSamples,
+    overlaps: worstOverlap.overlaps, overlapSamples: worstOverlap.overlapSamples,
+    bleed: reports.reduce((m, r) => Math.max(m, r.bleed || 0), 0),
+    sampledAt: sampleTimes });
 } catch (e) {
   audit = { error: String(e).split("\n")[0] };
 }

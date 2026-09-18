@@ -61,7 +61,8 @@ const stage = document.getElementById("stage");
 const cvP = document.getElementById("particles");
 const ctxP = cvP.getContext("2d");
 const layerBg = document.getElementById("layerBg");
-const layerGhost = document.getElementById("layerGhost");
+  const layerGhost = document.getElementById("layerGhost");
+  layerGhost.dataset.decor = "1";   // decorative: the layout audit allows this layer to bleed
 const layerMid = document.getElementById("layerMid");
 const layerFg = document.getElementById("layerFg");
 const flash = document.getElementById("flash");
@@ -135,6 +136,9 @@ function build() {
   stage.style.background = `linear-gradient(160deg, ${C.bg} 0%, ${rgba(C.bg, 0.88)} 55%, #04060c 100%)`;
 
   scene = new Anim.Scene();
+  // Perpetual motion for every actor made from here on: the keyframes decide where a thing goes,
+  // this decides that it is never exactly still once it gets there.
+  scene.driftDefaults(M.drift || {}, S.id || "kinetic");
   const beats = CH.beats || [];
   const at = (kind, nth) => {
     const hits = beats.filter(b => b.kind === kind);
@@ -157,12 +161,21 @@ function build() {
                                      width: 1280, height: 720, duration: D,
                                      seed: (S.id || "kinetic") + "-bg" });
 
+  // The bar a reframe travels on. Without it a jump cut between two states of the same artwork
+  // reads as a glitch; with it, it reads as a new page.
+  const wipe = el(layerFg, "div", { position: "absolute", top: "-20%", height: "140%", width: "34%",
+    left: "-40%", opacity: "0", pointerEvents: "none", mixBlendMode: "screen",
+    background: `linear-gradient(90deg, ${rgba(C.text, 0)}, ${rgba(C.text, 0.5)}, ${rgba(C.text, 0)})`,
+    filter: `blur(${14 * s}px)` });
+
   // ghost type: a large word that keeps travelling for the whole shot
   let ghostNode = null;
   if (GHOST.text) {
     ghostNode = el(layerGhost, "div", { position: "absolute", top: `${50 * s}%`, whiteSpace: "nowrap",
       fontSize: `${120 * GHOST.scale * s}px`, fontWeight: "700", letterSpacing: `${-2 * s}px`,
-      color: rgba(C.text, GHOST.opacity), transform: "translateY(-50%)", opacity: "1" }, GHOST.text);
+      // The decorative word bleeds across the frame on purpose, so its faintness lives in opacity,
+      // where the layout audit can see it, rather than in the alpha of its colour.
+      color: C.text, opacity: String(GHOST.opacity), transform: "translateY(-50%)" }, GHOST.text);
   }
 
   // ---------- motif: one shape that lives the whole shot and keeps changing form ----------
@@ -198,6 +211,10 @@ function build() {
   // element shares the same left edge so camera drift moves them together.
   const column = el(layerFg, "div", { position: "absolute", left: `${tx}px`, top: `${ty}px`,
     width: `${tw}px`, textAlign: lay.text.align });
+  // The text column is an actor, so one relayout moves the whole block in one piece, and the
+  // offset is bounded by how much room the layout actually leaves on either side.
+  const colA = scene.actor(column, { x: 0, y: 0 });
+  const room = Math.min(tx, Math.max(0, W() - tx - tw));
   const auto = lay.text.align === "center" ? "auto" : "0px";
   const eyebrowEl = el(column, "div", { opacity: "0", marginBottom: `${8 * s}px`,
     fontSize: `${12 * s}px`, letterSpacing: `${3 * s}px`, color: C.dim }, S.eyebrow || "");
@@ -278,19 +295,17 @@ function build() {
     footer.style.display = "none";
   }
 
-  // Camera as a keyframed actor too: one waypoint per beat, so it is always travelling.
+  // Camera: one spline through the whole shot, so it never restarts from a standstill, plus a hard
+  // reframe at every restage. The keys come from the same beat sheet the actors are dancing to.
   const camActor = new Anim.Actor(document.createElement("div"),
                                  { x: 0, y: 0, scale: 1, rot: 0, opacity: 1 });
-  const track = (M.camera_track && M.camera_track.length) ? M.camera_track : null;
-  if (track) {
-    for (const wp of track) {
-      camActor.to({ x: wp.x, y: wp.y, scale: wp.scale, rot: wp.rot },
-                  { at: wp.t, dur: wp.dur, ease: wp.ease, arc: wp.arc, spring: 0.35, damping: 0.75 });
-    }
-  } else {
+  const camKeys = (M.camera_keys && M.camera_keys.length) ? M.camera_keys : null;
+  const camPath = camKeys ? new Anim.Path(camKeys) : null;
+  if (!camPath) {
     camActor.to({ scale: CAM.scale_to || 1.04, x: CAM.x_to || 0, y: CAM.y_to || 0 },
                 { at: 0, dur: D, ease: "inout" });
   }
+  const CUTS = M.cuts || [];
   const camLayers = [{ node: layerBg, depth: DEPTH.bg }, { node: layerGhost, depth: DEPTH.bg * 0.8 },
                      { node: layerMid, depth: DEPTH.mid }, { node: layerFg, depth: DEPTH.fg }];
   const camHits = beats.filter(b => b.kind === "emphasis").map(b => b.t);
@@ -365,6 +380,26 @@ function build() {
     } else if (k === "count") {
       rowActors.forEach((r, i) => r.wrapA.to({ x: -8 + 16 * (i % 2) }, { at: b.t, dur: 0.4, ease: "out" }));
     } else if (k === "shuffle") {
+    } else if (k === "relayout") {
+      // The composition changes rather than the decoration: the text block and the subject swap
+      // sides. This is the gesture a beat sheet of pulses cannot replace - the page the viewer is
+      // looking at is rearranged, not just nudged.
+      const side = (n % 2 ? -1 : 1) * Math.min(room * 0.6, 150 * s);
+      colA.to({ x: side, y: -22 * s }, { at: b.t, dur: 0.8, ease: "inout", arc: 30 });
+      plateA.to({ x: -side * 1.8, scale: (cover ? 1.02 : SUBJ_SCALE) * 1.04, rot: -1.4 },
+                { at: b.t, dur: 0.95, ease: "inout", arc: 24 });
+      motifA.to({ x: -side * 1.2, scale: 1.5, opacity: 0.15 },
+                { at: b.t + 0.08, dur: 0.9, ease: "out", arc: 40 });
+      chipA.to({ opacity: 0.9, y: 0 }, { at: b.t, dur: 0.5 });
+    } else if (k === "restage") {
+      // The camera cut and its wipe carry this one; the actors only take the hit and re-centre, so
+      // the new page starts from a composed frame rather than a drifted one.
+      colA.to({ x: 0, y: 0 }, { at: b.t, dur: 0.7, ease: "back" });
+      plateA.to({ x: 0, rot: 0, scale: (cover ? 1.02 : SUBJ_SCALE) * 1.06 },
+                { at: b.t, dur: 0.8, ease: "out" });
+      motifA.to({ x: 0, scale: 1.1, opacity: 0.22 },
+                { at: b.t, dur: 0.6, ease: "back" });
+      rowActors.forEach((r, i) => r.wrapA.to({ x: 0, y: 0 }, { at: b.t + i * 0.03, dur: 0.5, ease: "out" }));
       rowActors.forEach((r, i) => {
         const to = rowData.length > 1 ? ((i + 1) % rowData.length) : i;
         r.wrapA.to({ y: (to - i) * 54 * s, x: 10 }, { at: b.t, dur: 0.8, ease: "back", arc: 40 });
@@ -382,10 +417,11 @@ function build() {
     motifA.to({ scale: 0.94, opacity: 0.08 }, { at: ex.t, dur: 0.42, ease: "in" });
   }
 
+
   return { s, lay, tex, halo, sweep, vign, ghost: ghostNode, motif: motifA, plateA, scrimA,
            eyebrowA, ruleA, subA, rowActors, calloutA, footerA, chipA, plate, scrim,
-           wordActors, altActors, cover, tx, ty, tw, ruleW, ruleH,
-           camActor, camLayers, camHits, blobs };
+           wordActors, altActors, cover, tx, ty, tw, ruleW, ruleH, colA, room, wipe,
+           camActor, camPath, cuts: CUTS, camLayers, camHits, blobs };
 }
 
 L = build();
@@ -412,7 +448,7 @@ window.seek = (t) => {
   }
 
   // camera: keyframed travel + impact punch, applied per layer for parallax
-  const cam = L.camActor.sample(t);
+  const cam = L.camPath ? L.camPath.sample(t) : L.camActor.sample(t);
   L.blobs.forEach(b => b.render(t));
   let bump = 0;
   for (const h of L.camHits) {
@@ -427,7 +463,9 @@ window.seek = (t) => {
   for (const lay of L.camLayers) {
     const d = lay.depth;
     lay.node.style.transform =
-      `translate3d(${((cam.x || 0) * d + sx).toFixed(2)}px, ${((cam.y || 0) * d + sy).toFixed(2)}px, 0) ` +
+      // camera units are 1280x720; the viewport may not be, so the travel scales with it like
+      // everything else in the layout does.
+      `translate3d(${(((cam.x || 0) * d) * s + sx).toFixed(2)}px, ${(((cam.y || 0) * d) * s + sy).toFixed(2)}px, 0) ` +
       `scale(${(1 + (camScale - 1) * d).toFixed(5)}) rotate(${((cam.rot || 0) * d).toFixed(3)}deg)`;
   }
   scene.seek(t, null);
@@ -444,6 +482,18 @@ window.seek = (t) => {
     const span = W() * 2.4;
     const gx = GHOST.dir > 0 ? ((t * GHOST.speed) % span) - span * 0.7 : span * 0.7 - ((t * GHOST.speed) % span);
     L.ghost.style.left = `${gx.toFixed(1)}px`;
+  }
+
+  // Reframe wipe. The cut list comes from the shot's beat sheet, so the visual gesture and the
+  // camera jump are the same event rather than two things that happen to line up.
+  if (L.cuts && L.cuts.length) {
+    let op = 0, at = -1;
+    for (const c of L.cuts) {
+      const k = (t - c) / 0.34;
+      if (k >= 0 && k < 1) { op = Math.max(op, Math.sin(Math.PI * k)); at = k; }
+    }
+    L.wipe.style.opacity = (op * 0.5 * fadeOut).toFixed(4);
+    if (at >= 0) L.wipe.style.left = `${(-40 + 180 * at).toFixed(1)}%`;
   }
 
   flash.style.background = `radial-gradient(120% 120% at 50% 50%, ${rgba(C.accent, 0.5)}, ${rgba(C.accent, 0)} 60%)`;

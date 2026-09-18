@@ -13,9 +13,17 @@ import hashlib
 import random
 
 from . import spec as specmod
+from . import motion as motionmod
 
 # Motion vocabulary. Each kind is a different way for the frame to change.
-KINDS = ["build", "transform", "swap", "emphasis", "parallax_drift", "reveal", "count", "shuffle"]
+#
+# `relayout` and `restage` are different in kind from the rest: the others move material that is
+# already arranged, while these rearrange it. A shot can be busy with the first eight and still
+# be one page the viewer has been looking at for six seconds - which is the failure this module
+# exists to prevent, so the composition beats get their own cadence below.
+KINDS = ["build", "transform", "swap", "emphasis", "parallax_drift", "reveal", "count",
+         "shuffle", "relayout", "restage"]
+COMPOSITION_KINDS = ("relayout", "restage")
 
 BEAT_PERIOD = {"punch": 1.7, "build": 2.0, "steady": 2.6, "wave": 2.3, "calm": 3.4}
 ENERGY_SCALE = {"punch": 1.45, "build": 1.15, "steady": 0.9, "wave": 1.0, "calm": 0.6}
@@ -23,10 +31,56 @@ ENERGY_SCALE = {"punch": 1.45, "build": 1.15, "steady": 0.9, "wave": 1.0, "calm"
 # A change every this many seconds keeps a shot alive; beyond it the eye reads a still.
 MAX_GAP_TARGET = 2.4
 
+# How long the arrangement itself may hold. Deliberately shorter than MAX_GAP_TARGET: a state
+# change every 2.4s is not enough if every one of them is a nudge, which is what "it still
+# looks like a slide deck" means once you measure it.
+PAGE_DWELL = {"punch": 1.8, "build": 2.1, "steady": 2.5, "wave": 2.3, "calm": 3.0}
+# The enforced cadence snaps to an existing beat within half a second, so the real worst case is
+PAGE_GRACE = 0.5
+MAX_PAGE_TARGET = max(PAGE_DWELL.values()) + PAGE_GRACE
+
 
 def _rng(sig: dict, index: int) -> random.Random:
     seed = f"{sig.get('seed', 0)}:{index}:choreo"
     return random.Random(int(hashlib.sha256(seed.encode()).hexdigest()[:8], 16))
+
+
+def _enforce_pages(beats: list[dict], duration: float, dwell: float,
+                   ) -> tuple[list[dict], list[float]]:
+    """Guarantee the composition changes before it overstays.
+
+    Walks the beat sheet and promotes a beat to a composition kind whenever the arrangement has
+    been standing for `dwell` seconds, inserting one if there is no beat there to promote. Returns
+    the beats and the times at which the composition changed - the page boundaries.
+    """
+    out = [dict(b) for b in beats if b["kind"] != "exit"]
+    exit_beat = next((b for b in beats if b["kind"] == "exit"), None)
+    pages = [0.0]
+    last_kind = None
+    at = dwell
+    while at <= duration - 0.5:
+        # Snap onto a beat that is already close, so the page change lands on the same rhythm the
+        # rest of the shot is dancing to. Promote a nudge; insert a beat if nothing is near.
+        near = None
+        for b in out:
+            if abs(b["t"] - at) <= PAGE_GRACE and (near is None or
+                                               abs(b["t"] - at) < abs(near["t"] - at)):
+                near = b
+        if near is None:
+            near = {"t": round(at, 3), "intensity": 1.1, "forced": True,
+                    "kind": "relayout" if last_kind == "restage" else "restage"}
+            out.append(near)
+        elif near["kind"] not in COMPOSITION_KINDS:
+            near["kind"] = "relayout" if last_kind == "restage" else "restage"
+            near["forced"] = True
+            near["intensity"] = max(1.0, float(near["intensity"]))
+        pages.append(near["t"])
+        last_kind = near["kind"]
+        at = near["t"] + dwell
+    out.sort(key=lambda b: b["t"])
+    if exit_beat:
+        out.append(exit_beat)
+    return out, pages
 
 
 def plan(sig: dict, index: int, duration: float, *, beats: list[float] | None = None,
@@ -64,6 +118,12 @@ def plan(sig: dict, index: int, duration: float, *, beats: list[float] | None = 
         beats_out.append({"t": when, "kind": kind, "intensity": intensity,
                           "on_beat": near_beat})
 
+    # Composition cadence, on top of the beat cadence. This is the part that answers "the same
+    # page stays on screen too long" directly: the arrangement is forced to change on its own
+    # clock, whether or not a nudge happened in between.
+    dwell = PAGE_DWELL.get(pacing, 2.5)
+    beats_out, pages = _enforce_pages(beats_out, duration, dwell)
+
     exit_at = round(max(0.3, duration - 0.42), 3)
     if exit_at > beats_out[-1]["t"] + 0.15:
         beats_out.append({"t": exit_at, "kind": "exit", "intensity": 0.8})
@@ -82,6 +142,10 @@ def plan(sig: dict, index: int, duration: float, *, beats: list[float] | None = 
     return {
         "beats": beats_out,
         "swap": swap,
+        "pages": pages,
+        "max_dwell": round(max([duration - pages[-1]] +
+                               [pages[i + 1] - pages[i] for i in range(len(pages) - 1)]), 3),
+        "reframes": sum(1 for b in beats_out if b["kind"] == "restage"),
         "states": len(beats_out),
         "max_gap": max(gaps) if gaps else duration,
         "gaps": gaps,
@@ -106,6 +170,7 @@ def inject(spec: dict, log=print) -> dict:
 
     rows = []
     worst = 0.0
+    worst_page = 0.0
     total_states = 0
     for i, seg in enumerate(segments):
         data = seg.setdefault("data", {})
@@ -113,10 +178,9 @@ def inject(spec: dict, log=print) -> dict:
         if times:
             start = starts.get(seg["id"], 0.0)
             local_beats = [t - start for t in times if start < t < start + float(seg["duration"])]
-        motion_energy = ((data.get("motion") or {}).get("energy"))
-        energy = float(motion_energy) if motion_energy else ENERGY_SCALE.get(sig.get("pacing", "steady"), 1.0)
-        if data.get("still"):
-            energy *= 0.5
+        # The energy profile lives in the motion compiler. It runs after this module now (the
+        # camera is keyed to the beat sheet), so ask it directly rather than reading its output.
+        energy = motionmod.energy_of(spec, seg)
         choreo = plan(sig, i, float(seg["duration"]), beats=local_beats, energy=energy,
                       has_alt=bool(data.get("titleAlt") or data.get("quoteAlt")
 
@@ -125,26 +189,40 @@ def inject(spec: dict, log=print) -> dict:
         data["choreography"] = choreo
         total_states += choreo["states"]
         worst = max(worst, choreo["max_gap"])
+        worst_page = max(worst_page, choreo["max_dwell"])
         rows.append({"id": seg["id"], "seconds": seg["duration"], "states": choreo["states"],
-                     "max_gap": choreo["max_gap"], "pattern": choreo["pattern"]})
+                     "max_gap": choreo["max_gap"], "max_dwell": choreo["max_dwell"],
+                     "reframes": choreo["reframes"], "pattern": choreo["pattern"]})
 
     return {"applied": True, "segments": rows, "total_states": total_states,
             "worst_gap": round(worst, 3),
             "verdict": "alive" if worst <= MAX_GAP_TARGET else "too_still"}
 
+    return {"applied": True, "segments": rows, "total_states": total_states,
+            "worst_gap": round(worst, 3), "worst_page": round(worst_page, 3),
+            "reframes": sum(r["reframes"] for r in rows),
+            "verdict": ("alive" if worst <= MAX_GAP_TARGET and worst_page <= MAX_PAGE_TARGET
+                        else "too_still")}
+
 
 def report(spec: dict) -> dict:
     rows = [{"id": s["id"], "seconds": s["duration"],
              "states": (s.get("data", {}).get("choreography") or {}).get("states"),
-             "max_gap": (s.get("data", {}).get("choreography") or {}).get("max_gap")}
+             "max_gap": (s.get("data", {}).get("choreography") or {}).get("max_gap"),
+             "max_dwell": (s.get("data", {}).get("choreography") or {}).get("max_dwell"),
+             "reframes": (s.get("data", {}).get("choreography") or {}).get("reframes")}
             for s in spec.get("segments", [])]
     rows = [r for r in rows if r["states"]]
     if not rows:
         return {}
     worst = max(r["max_gap"] for r in rows)
+    worst_page = max(r["max_dwell"] or 0.0 for r in rows)
     return {
         "segments": rows,
         "total_state_changes": sum(r["states"] for r in rows),
+        "total_reframes": sum(r["reframes"] or 0 for r in rows), 
         "worst_gap": round(worst, 3),
-        "verdict": "alive" if worst <= MAX_GAP_TARGET else "too_still",
+        "worst_page": round(worst_page, 3),
+        "verdict": ("alive" if worst <= MAX_GAP_TARGET and worst_page <= MAX_PAGE_TARGET
+                    else "too_still"),
     }

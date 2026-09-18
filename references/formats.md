@@ -45,8 +45,9 @@ The result is a list of timestamps. Build the timeline from them, either by cutt
 ## Long-form explainer (5 分钟以上)
 
 See [longform.md](longform.md). The short version: narration script first → one paragraph per
-segment → `"still": true` for slides → animated segments only for the hook, section breaks and real
-diagrams → chapter chips → global progress bar.
+segment → `anim_fps` on the long stretch, full rate on the hook and the diagrams that matter →
+chapter chips → global progress bar. Avoid `"still": true` except for real title cards: a long
+video built from held frames is a slideshow.
 
 ## Explainer with talking-head or voice-over (解说视频)
 

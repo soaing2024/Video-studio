@@ -75,13 +75,22 @@
     stage.insertBefore(particles, stage.firstChild);
     const layerBg = mk("layerBg");
     const layerGhost = mk("layerGhost");
+    layerGhost.dataset.decor = "1";   // decorative: bleeds across the frame on purpose
     const layerMid = mk("layerMid");
     const layerFg = mk("layerFg");
     const flash = mk("flash");
+    // The wipe a reframe travels on: one high-contrast bar crossing the frame in a third of a
+    // second. Without it, a jump cut between two states of the same artwork reads as a glitch;
+    // with it, it reads as a new page.
+    const wipe = mk("wipe");
+    Object.assign(wipe.style, { position: "absolute", top: "-20%", height: "140%", width: "34%",
+      left: "-40%", opacity: "0", pointerEvents: "none", mixBlendMode: "screen",
+      background: "linear-gradient(90deg, rgba(255,255,255,0), rgba(255,255,255,0.55), rgba(255,255,255,0))", 
+      filter: "blur(14px)" });
     const cv = particles;
     cv.width = window.innerWidth;
     cv.height = window.innerHeight;
-    return { layerBg, layerGhost, layerMid, layerFg, flash, canvas: cv, ctx: cv.getContext("2d") };
+    return { layerBg, layerGhost, layerMid, layerFg, flash, wipe, canvas: cv, ctx: cv.getContext("2d") };
   }
 
   function seedParticles(cfg, seedText, w, h) {
@@ -113,6 +122,10 @@
   function makeCamera(motion, layers, opts) {
     const o = opts || {};
     const quant = o.quantize || 1;          // 1 for normal, >1 for pixel-art (whole pixels)
+    // Every template lays out in 1280x720 units scaled by the viewport, so the camera has to be
+    // scaled the same way. Applying raw pixels made the same shot move twice as far when it was
+    // rendered at half size, which is how a layout that fits at 720p clipped at 360p.
+    const view = (window.innerHeight || 720) / 720;
     const actor = new global.Anim.Actor(document.createElement("div"),
                                         { x: 0, y: 0, scale: 1, rot: 0, opacity: 1 });
     const track = (motion.camera_track && motion.camera_track.length) ? motion.camera_track : null;
@@ -128,6 +141,10 @@
       actor.to({ scale: cam.scale_to || 1.04, x: cam.x_to || 0, y: cam.y_to || 0 },
                { at: 0, dur: o.duration || 6, ease: "inout" });
     }
+    // camera_keys is a spline through the poses the old waypoint list described, so the camera no
+    // longer restarts from a standstill at every beat - and a `cut: true` key reframes hard.
+    const keys = (motion.camera_keys && motion.camera_keys.length) ? motion.camera_keys : null;
+    const path = keys ? new global.Anim.Path(keys) : null;
     const q = (v) => (quant > 1 ? Math.round(v / quant) * quant : v);
     return {
       actor, layers,
@@ -142,7 +159,7 @@
       },
       apply(t) {
         const shake = o.shake || { amp: 1.5, decay: 0.3, freq: 13 };
-        const cam = actor.sample(t);
+        const cam = path ? path.sample(t) : actor.sample(t);
         const b = this.bump(t, shake);
         const sx = shake.amp * b * Math.sin(t * shake.freq);
         const sy = shake.amp * 0.65 * b * Math.cos(t * shake.freq * 1.3);
@@ -150,7 +167,7 @@
         for (const lay of layers) {
           const d = lay.depth;
           lay.node.style.transform =
-            `translate3d(${q(cam.x * d + sx).toFixed(2)}px, ${q(cam.y * d + sy).toFixed(2)}px, 0) ` +
+            `translate3d(${q((cam.x * d) * view + sx).toFixed(2)}px, ${q((cam.y * d) * view + sy).toFixed(2)}px, 0) ` +
             `scale(${(1 + (sc - 1) * d).toFixed(5)}) rotate(${(cam.rot * d).toFixed(3)}deg)`;
         }
         return b;
@@ -170,6 +187,18 @@
       const sw = ((t * (o.sweepSpeed || 360)) % (window.innerWidth * 2.2)) - window.innerWidth * 1.1;
       L.sweep.style.left = `${sw.toFixed(1)}px`;
       L.sweep.style.opacity = ((o.sweepOpacity || 0.1) * 4 * fade).toFixed(4);
+    }
+    // Reframes get a wipe. The cut list comes from the shot's beat sheet, so every template that
+    // calls ambient() renders the same gesture - which is what makes a new page legible as one.
+    const wipe = L.wipe || (L.kit && L.kit.wipe);
+    if (wipe && o.cuts && o.cuts.length) {
+      let op = 0, at = -1;
+      for (const c of o.cuts) {
+        const k = (t - c) / 0.34;
+        if (k >= 0 && k < 1) { op = Math.max(op, Math.sin(Math.PI * k)); at = k; }
+      }
+      wipe.style.opacity = (op * 0.55 * fade).toFixed(4);
+      if (at >= 0) wipe.style.left = `${(-40 + 180 * at).toFixed(1)}%`;
     }
     if (L.ghost && o.ghost) {
       const span = window.innerWidth * 2.4;

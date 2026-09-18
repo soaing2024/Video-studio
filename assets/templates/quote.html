@@ -58,6 +58,8 @@ function build() {
     `linear-gradient(150deg, #0d1428 0%, ${C.bg} 60%, #05070e 100%)`;
   const kit = Kit.buildStage(stage, {});
   const scene = new Anim.Scene();
+  // Perpetual motion for every actor made from here on, so no two frames of the shot match.
+  scene.driftDefaults(M.drift || {}, S.id || "quote");
   const particles = Kit.seedParticles(PARTICLES, S.id || "quote", W(), H());
 
   const tex = Kit.el(kit.layerBg, "div", Object.assign({ position: "absolute", inset: "0", opacity: "0" },
@@ -75,6 +77,7 @@ function build() {
   const glyph = Kit.el(kit.layerMid, "div", { position: "absolute", left: `${116 * s}px`, top: `${120 * s}px`,
     fontSize: `${340 * s}px`, lineHeight: "0.8", fontWeight: "700", color: Kit.rgba(C.accent, 0.14),
     opacity: "0", userSelect: "none" }, "\u201C");
+  glyph.dataset.decor = "1";   // a decorative quotation mark, allowed to bleed
   const glyphA = scene.actor(glyph, { opacity: 0, scale: 0.7, rot: -8 });
 
   const bar = Kit.el(kit.layerMid, "div", { position: "absolute", left: `${132 * s}px`, top: `${196 * s}px`,
@@ -190,7 +193,8 @@ window.seek = (t) => {
                       pulseAmount: (M.pulse && M.pulse.amount) || 0.012,
                       pulseFreq: (M.pulse && M.pulse.freq) || 1,
                       sweepSpeed: (M.sweep && M.sweep.speed) || 340,
-                      sweepOpacity: (M.sweep && M.sweep.opacity) || 0.08 });
+                      sweepOpacity: (M.sweep && M.sweep.opacity) || 0.08,
+                      cuts: M.cuts || [] });
 
   Kit.drawParticles(L.kit.ctx, L.particles, t, C.text, W(), H());
 };

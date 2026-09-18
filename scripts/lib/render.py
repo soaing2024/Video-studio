@@ -46,6 +46,21 @@ def segment_path(spec: dict, sid: str) -> Path:
     return build_dir(spec) / "segments" / f"{sid}.mp4"
 
 
+def segment_fps(spec: dict, seg: dict) -> int:
+    """Frames per second to render one segment at.
+
+    Long projects cannot afford the project frame rate for every shot, which is why the old
+    pipeline rendered those shots as a single held frame - and why the result read as a slide
+    deck. Rendering at a lower rate keeps the cost down without making the shot static: the
+    assembly step duplicates frames back up to the project rate.
+    """
+    project = int(spec["video"]["fps"])
+    want = (seg.get("data") or {}).get("anim_fps") or (spec.get("render") or {}).get("anim_fps")
+    if not want:
+        return project
+    return max(4, min(project, int(want)))
+
+
 def _key(spec: dict, seg: dict, w: int, h: int) -> str:
     hsh = hashlib.sha256()
     tpl = template_path(seg["template"])
@@ -57,7 +72,7 @@ def _key(spec: dict, seg: dict, w: int, h: int) -> str:
         if p.is_file():
             st = p.stat()
             hsh.update(f"{st.st_size}:{int(st.st_mtime)}".encode())
-    hsh.update(f"{w}x{h}@{spec['video']['fps']}:{float(seg['duration'])}".encode())
+    hsh.update(f"{w}x{h}@{segment_fps(spec, seg)}:{float(seg['duration'])}".encode())
     return hsh.hexdigest()[:16]
 
 
@@ -127,7 +142,7 @@ def render_segment(spec: dict, seg: dict, ffmpeg: str, node: str, force: bool = 
 
     cmd = [node, str(runtime.SKILL_DIR / "scripts" / "render_segment.mjs"),
            "--scene", str(tpl), "--out", str(out), "--data", str(data_file),
-           "--fps", str(spec["video"]["fps"]), "--duration", str(seg["duration"]),
+           "--fps", str(segment_fps(spec, seg)), "--duration", str(seg["duration"]),
            "--width", str(w), "--height", str(h), "--ffmpeg", ffmpeg,
            "--crf", str((spec.get("render") or {}).get("crf", 12))]
     env = runtime_env()

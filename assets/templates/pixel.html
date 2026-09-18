@@ -27,6 +27,8 @@ const C = Object.assign({
   black: "#05070d", series: ["#e0455f", "#38bdf8", "#a78bfa", "#4ade80"]
 }, V.colors || {});
 
+
+
 const cv = document.getElementById("screen");
 const ctx = cv.getContext("2d");
 const buf = document.createElement("canvas");
@@ -62,7 +64,9 @@ function seedPix() {
 
 // quantised numeric tracks: the runtime does the timing maths, we round at draw time
 function track(initial, moves) {
-  const a = new Anim.Actor(document.createElement("div"), initial);
+  // Drift on every quantised track: even a held pose keeps sub-pixel life before it is rounded.
+  const a = new Anim.Actor(document.createElement("div"), initial,
+                           { drift: M.drift, phase: (MOVES.length * 0.29) % 1 });
   moves.forEach(m => a.to(m.to, m));
   return a;
 }
@@ -76,9 +80,12 @@ const kinds = (kind) => BEATS.filter(b => b.kind === kind);
 const at = (kind) => BEATS.find(b => b.kind === kind) || null;
 const MOVES = [];
 const HITS = kinds("emphasis").map(b => b.t);
-const CAM = track({ x: 0, y: 0 }, (M.camera_track && M.camera_track.length ? M.camera_track : []).map(wp => ({
-  at: wp.t, dur: wp.dur, to: { x: wp.x || 0, y: wp.y || 0 }, ease: wp.ease || "inout", arc: wp.arc || 0
-})));
+// The camera is a spline through the shot's beat sheet rather than a list of separate eases: it
+// never restarts from a standstill, and a restage is a hard jump in the same track. Values are
+// rounded at draw time, which is the whole point of the template.
+const CAM = (M.camera_keys && M.camera_keys.length)
+  ? new Anim.Path(M.camera_keys)
+  : track({ x: 0, y: 0 }, [{ at: 0, dur: D, to: { x: 0, y: 0 }, ease: "inout" }]);
 
 let spriteY = track({ v: 46 }, []);
 let scanY = track({ v: -14 }, []);
@@ -114,7 +121,10 @@ window.seek = (t) => {
   layout();
   const fadeOut = 1 - Anim.EASE.out(Math.min(1, Math.max(0, (t - (D - 0.6)) / 0.6)));
   const fadeIn = Anim.EASE.out(Math.min(1, Math.max(0, t / 0.35)));
-  const camX = q(t, CAM, "x", 0), camY = q(t, CAM, "y", 0);
+  // Camera keys are in 1280x720 units; this canvas is BASE_W wide, so the travel converts with
+  // it. Without this the same shot moved four times as far here as in every other template.
+  const camUnit = BASE_W / 1280;
+  const camX = q(t, CAM, "x", 0) * camUnit, camY = q(t, CAM, "y", 0) * camUnit;
 
   px(0, 0, BASE_W, BASE_H, C.bg);
   dither(0, 0, BASE_W, BASE_H, C.bg2);
