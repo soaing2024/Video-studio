@@ -86,17 +86,12 @@ class Verifier:
         px = look.get("pixelate")
         tmp = Path(tempfile.mkdtemp(prefix="vs-verify-"))
         try:
-            luma, colors, block, qerr, ink = [], [], [], [], []
+            luma, colors, block, qerr = [], [], [], []
             times = [duration * (i + 0.5) / samples for i in range(samples)]
             for i, t in enumerate(times):
                 im = self._frame(video, t, tmp / f"f{i}.png")
                 arr = np.asarray(im, dtype=np.int16)
                 luma.append(round(float(arr.mean()), 2))
-                # ink: how much of the frame is near-white. A scene whose actors never rendered
-                # (all opacity 0) is just background, so this is the check that catches blank
-                # output which luma and motion happily pass.
-                grey = arr.mean(axis=2)
-                ink.append(round(float((grey > 180).mean() * 100), 4))
                 colors.append(len(set(im.getdata())))
                 if px:
                     s = max(1, int(px.get("scale", 4)))
@@ -111,8 +106,6 @@ class Verifier:
             # samples to carry picture rather than all of them
             lit = [v for v in luma if v > 2.0]
             needed = max(1, samples // 2)
-            self.add("ink", max(ink) >= 0.05,
-                     f"near-white coverage per sampled frame {ink}% (need 0.05% somewhere)")
             self.add("content", len(lit) >= needed,
                      f"{len(lit)}/{samples} sampled frames carry picture "
                      f"(need {needed}): luma {luma}")

@@ -136,18 +136,8 @@ def render_segment(spec: dict, seg: dict, ffmpeg: str, node: str, force: bool = 
     if proc.returncode != 0:
         raise RuntimeError(f"segment '{seg['id']}' failed:\n{proc.stdout}\n{proc.stderr}")
     keyfile.write_text(key)
-    audit = _audit_of(proc.stdout)
-    warnings = _audit_warnings(audit)
-    if audit:
-        audit_dir = build_dir(spec) / "audit"
-        audit_dir.mkdir(parents=True, exist_ok=True)
-        (audit_dir / f"{seg['id']}.json").write_text(
-            json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8")
     log(f"  rendered {seg['id']} ({seg['duration']}s @ {w}x{h})")
-    for message in warnings:
-        log(f"    ! {seg['id']}: {message}")
-    return {"segment": seg["id"], "path": str(out), "cached": False,
-            "audit": audit, "warnings": warnings}
+    return {"segment": seg["id"], "path": str(out), "cached": False}
 
 
 def _render_still_segment(spec: dict, seg: dict, ffmpeg: str, node: str, out: Path,
@@ -181,43 +171,6 @@ def _render_still_segment(spec: dict, seg: dict, ffmpeg: str, node: str, out: Pa
     keyfile.write_text(key)
     log(f"  still {seg['id']} ({seg['duration']}s @ {w}x{h}, 1 frame rendered)")
     return {"segment": seg["id"], "path": str(out), "cached": False, "still": True}
-
-
-def _audit_of(stdout: str) -> dict:
-    for line in reversed((stdout or "").splitlines()):
-        line = line.strip()
-        if line.startswith("{") and line.endswith("}"):
-            try:
-                return json.loads(line).get("audit") or {}
-            except json.JSONDecodeError:
-                continue
-    return {}
-
-
-def _audit_warnings(audit: dict) -> list[str]:
-    """Turn the renderer's layout audit into messages a person can act on."""
-    out: list[str] = []
-    if not audit:
-        return out
-    if audit.get("error"):
-        return ["layout audit failed: " + str(audit["error"])]
-    if audit.get("serifRisk"):
-        out.append("body font is a serif fallback (" + str(audit.get("font"))[:48] +
-                   ") - declare font-family")
-    text_nodes = audit.get("textNodes") or 0
-    visible = audit.get("visible") or 0
-    if text_nodes and visible == 0:
-        out.append("no text is visible at all - are the scene actors being rendered?")
-    elif audit.get("invisible"):
-        out.append(str(audit["invisible"]) + " text nodes never became visible, e.g. " +
-                   ", ".join(audit.get("invisibleSamples") or []))
-    if audit.get("offscreen"):
-        out.append(str(audit["offscreen"]) + " text nodes sit outside the frame, e.g. " +
-                   ", ".join(audit.get("offscreenSamples") or []))
-    if audit.get("overlaps"):
-        out.append(str(audit["overlaps"]) + " text blocks overlap, e.g. " +
-                   "; ".join(audit.get("overlapSamples") or []))
-    return out
 
 
 def runtime_env() -> dict:

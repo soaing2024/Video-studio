@@ -108,7 +108,6 @@ function build() {
   [layerBg, layerMid, layerFg, flash].forEach(l => { l.innerHTML = ""; });
   cvP.width = W(); cvP.height = H();
   seedParticles();
-  stage.style.fontFamily = Kit.FONT;
   stage.style.background = `linear-gradient(150deg, #0b1120 0%, ${C.bg} 60%, #04060d 100%)`;
 
   const scene = new Anim.Scene();
@@ -161,7 +160,7 @@ function build() {
     fontWeight: "500", color: C.text });
   const altBox = S.titleAlt ? el(layerFg, "div", { position: "absolute", left: colX, top: `${150 * s}px`,
     width: `${colW}px`, fontSize: `${(S.titleSize || 44) * TS * s}px`, lineHeight: "1.22",
-    fontWeight: "500", color: C.accent }) : null;
+    fontWeight: "500", color: C.accent, opacity: "0" }) : null;
   const wordActors = splitWords(S.title).map((piece) => {
     const span = document.createElement("span");
     span.className = "word";

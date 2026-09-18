@@ -53,16 +53,7 @@
   }
 
   /* Layers + particles canvas + flash, in the stacking order templates expect. */
-  const FONT = "'Microsoft YaHei UI','Microsoft YaHei','Noto Sans SC','Source Han Sans SC'," +
-               "'PingFang SC','Segoe UI',system-ui,-apple-system,sans-serif";
-
   function buildStage(stage, o) {
-    // never inherit the page default: it is a serif face, which breaks mixed CJK + Latin type
-    stage.style.fontFamily = FONT;
-    // CJK fonts have very tall default line boxes (an 88px glyph can take a 150px line), so pin a
-    // predictable ratio; otherwise fixed pixel offsets overlap the moment text is laid out.
-    stage.style.lineHeight = "1.25";
-    document.body.style.fontFamily = FONT;
     const mk = (id) => {
       const n = document.createElement("div");
       n.className = "layer";
@@ -234,6 +225,6 @@
     return out;
   }
 
-  global.Kit = { FONT, clamp01, rgba, el, splitWords, rng, textureCss, buildStage, seedParticles,
+  global.Kit = { clamp01, rgba, el, splitWords, rng, textureCss, buildStage, seedParticles,
                  drawParticles, makeCamera, ambient, bandSwapper, backdrop };
 })(window);

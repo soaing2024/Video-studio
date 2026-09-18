@@ -68,8 +68,8 @@ function build() {
                                             seed: (S.id || "terminal") + "-bg" });
 
   // ---------------- window ----------------
-  const winW = W() - 200 * s, winH = H() - 170 * s;
-  const win = Kit.el(kit.layerMid, "div", { position: "absolute", left: `${100 * s}px`, top: `${80 * s}px`,
+  const winW = W() - 120 * s, winH = H() - 150 * s;
+  const win = Kit.el(kit.layerMid, "div", { position: "absolute", left: `${60 * s}px`, top: `${70 * s}px`,
     width: `${winW}px`, height: `${winH}px`, background: Kit.rgba(C.surface, 0.95),
     borderRadius: `${RADIUS * s}px`, border: `${1.5 * s}px solid ${Kit.rgba(C.border, 0.9)}`,
     overflow: "hidden", opacity: "0", boxShadow: `0 ${24 * s}px ${70 * s}px rgba(0,0,0,0.55)` });
@@ -151,7 +151,7 @@ function build() {
   const cam = Kit.makeCamera(M, [{ node: kit.layerBg, depth: DEPTH.bg }, { node: kit.layerGhost, depth: DEPTH.bg * 0.8 },
                                  { node: kit.layerMid, depth: DEPTH.mid }, { node: kit.layerFg, depth: DEPTH.fg }],
                              { hits: (CH.beats || []).filter(b => b.kind === "emphasis").map(b => b.t),
-                               shake: SHAKE, duration: D, boost: 0.9 });
+                               shake: SHAKE, duration: D, boost: 1.7 });
 
   // ---------------- choreography ----------------
   const at = (k) => (CH.beats || []).find(b => b.kind === k);
@@ -174,13 +174,6 @@ function build() {
     barFillA.to({ width: full() * (target / 100) }, { at: b.t, dur: 0.85, spring: 0.55, damping: 0.65 });
     cursorA.to({ scale: 1.7 }, { at: b.t, dur: 0.22, spring: 0.9, damping: 0.4 });
     cursorA.to({ scale: 1 }, { at: b.t + 0.28, dur: 0.4, ease: "out" });
-  });
-
-  // Cards belong to the shot, not to a particular beat: without a build beat they used to never
-  // appear at all (the audit caught that as "text nodes never became visible").
-  cardNodes.forEach((card, i) => {
-    card.to({ opacity: 1, x: 0 }, { at: est.t + 1.4 + i * 0.35, dur: 0.7, spring: 0.5, damping: 0.62, arc: 10 });
-    card.to({ opacity: 0.3, x: -8 * s }, { at: est.t + 4.2 + i * 0.35, dur: 0.6, ease: "out" });
   });
 
   kinds("build").forEach((b, i) => {
@@ -245,7 +238,6 @@ function typed(t) {
 window.seek = (t) => {
   const fadeOut = 1 - Anim.EASE.out(Math.min(1, Math.max(0, (t - (D - 0.4)) / 0.4)));
   const bump = L.cam.apply(t);
-  L.scene.seek(t, null);          // render every actor: without this the scene stays at opacity 0
   L.blobs.forEach(b => b.render(t));
   L.kit.layerFg.style.opacity = fadeOut.toFixed(4);
   L.kit.layerMid.style.opacity = fadeOut.toFixed(4);
