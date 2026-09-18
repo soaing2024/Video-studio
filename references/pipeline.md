@@ -148,6 +148,20 @@ segments for re-runs.
 8. **`-shortest` is required when audio and video are mapped together**, otherwise a looping music
    track can extend the file past the last video frame.
 
+9. **A helper that silently drops its text argument** produced a frame where the numbers, the
+   axis labels and the closing line never rendered, while the render summary stayed clean and the
+   still looked like an empty page. Measure ink in the regions that must carry content
+   (`scripts/qc_video.py`) instead of trusting the render.
+10. **An exit factor that saturates.** `opacity = exit * enter` behaves during the transition and
+    then pins the element at 0 forever once `exit` reaches 1. Give exits their own window.
+11. **`position: absolute` inside a flex parent is not centred** - flex alignment only applies to
+    in-flow children, so a "centred" digit lands in a corner.
+12. **A fade to or from black on a white video** both looks wrong and trips the `fade_in` gate.
+    Fade inside the scene (animate content opacity on a white stage) and leave `look.fade_in: 0`.
+13. **Colour counts are meaningless on an encoded frame too** - anti-aliasing and the codec invent
+    thousands of one-pixel shades, so a raw unique count flags every frame. Quantise and threshold
+    by area before judging a palette, and ignore the assembler's own overlays (progress bar).
+
 ## 10. Extending it
 
 - **New scene:** write one (`vs.py init --duration N` scaffolds one), keep the `seek(t)` contract and the

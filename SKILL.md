@@ -28,8 +28,12 @@ render time is spent.
 
 1. `probe` the source assets: size, alpha coverage, dominant colours, duration, loudness.
 2. Write a project spec (JSON; `//` comments allowed).
-3. `preview` a still frame per segment while iterating on design - seconds per look, not minutes.
-4. `run`: render each segment straight into a cached clip, assemble with ffmpeg, verify by
+3. Write the seven-line motion spec and declare the handoffs in `data.beats`, then audit them:
+   `python scripts/beat_audit.py project.json` fails on exit-then-enter gaps, over-long moves and
+   weak overlaps - the three causes of a slide-deck feel
+   ([references/rhythm-handoff.md](references/rhythm-handoff.md)).
+4. `preview` a still frame per segment while iterating on design - seconds per look, not minutes.
+5. `run`: render each segment straight into a cached clip, assemble with ffmpeg, verify by
    measurement. Frames are piped into ffmpeg's stdin; no PNG sequence ever hits disk.
 
 ## Commands
@@ -72,7 +76,7 @@ turn.
   "duration": 24.0,
   "scene": "scenes/take.html",
   "hold": [[6.0, 11.0]],              // seconds where the picture genuinely does not change
-  "data": { "title": "…", "caption": "…" },
+  "data": { "title": "...", "caption": "..." },
   "audio": {
     "tracks": [
       { "src": "assets/voice.wav", "at": 1.0, "gain_db": -3 },
@@ -139,6 +143,12 @@ pass, and the list of skeletons that are already used up:
   whole pixels - sub-pixel movement destroys the style once magnified.
 - **Audio levels:** a music bed should measure a mean of roughly -45 to -10 dB in `verify`; voice
   around -18 to -12 dB. `amix` normalises by track count, so each added track costs about 6 dB.
+- **Overlap the handoffs.** A transition whose exit finishes before its entrance begins reads as a
+  slide deck however good the easing is; letting the two windows share 40-60% of their duration
+  removes it, and whole-frame moves stay under ~1.2s with most of their change up front.
+- **Judge the frame, not only the pixels.** Composition and colour are gated in
+  [references/taste.md](references/taste.md); rhythm and handoffs in
+  [references/rhythm-handoff.md](references/rhythm-handoff.md).
 - **Always verify.** If a check fails, fix the spec, not the check.
 
 ## Routing
@@ -168,3 +178,12 @@ pass, and the list of skeletons that are already used up:
   the macrostructures, the six generative operators for inventing a mechanic, motion tokens,
   the twelve timeline laws, the slop gates and the used-skeleton graveyard:
   [references/choreography.md](references/choreography.md). Written in Chinese.
+- Aesthetic gates - proportion, type-scale jump, colour budget, ink ratio, reference traditions
+  and the AI-slop blacklist: [references/taste.md](references/taste.md). Written in Chinese.
+- The slide-deck failure - two-ended easing, exit-then-enter gaps, whole-frame replacement, and
+  the numbers that fix each: [references/rhythm-handoff.md](references/rhythm-handoff.md). Written in Chinese.
+- Motion realism - the seven-line motion spec, twelve hooks, per-feeling parameter sets:
+  [references/motion-realism.md](references/motion-realism.md). Written in Chinese.
+- Fast lane and self-checks - `scripts/scaffold.py` builds a project from `assets/starter/`;
+  `scripts/qc_video.py` measures region ink and prints ASCII frame maps; `scripts/taste_check.py`
+  reports rhythm and composition; `scripts/beat_audit.py` audits the handoff timeline.

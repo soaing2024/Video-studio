@@ -1,0 +1,39 @@
+{
+  // Motion Video Kit 模板。// 注释是允许的（解析时会去掉），出片前请删掉占位符。
+  "name": "{{NAME}}",
+  "video": { "width": {{WIDTH}}, "height": {{HEIGHT}}, "fps": {{FPS}}, "crf": 18, "preset": "slow" },
+  "render": { "jobs": {{JOBS}}, "crf": 12 },
+  "duration": {{DURATION}},
+  "scene": "scenes/take.html",
+
+  // 真正不动的秒数写进 hold：渲染器只渲一帧，其余复用。没有就留空数组。
+  "hold": [],
+
+  // data 会被整块交给场景（window.SCENE，键是扁平的）。
+  // 惯例：timeline 给章节起始时间，eyebrows/captions 给每章一两行字。
+  "data": {
+    "timeline": [
+      { "index": 1, "at": 0.0, "seconds": {{DURATION}}, "role": "open", "intent": "TODO：这一拍结束时观众应该明白什么", "on_screen": "TODO", "device": "移出 / 移入", "static": false }
+    ],
+    "eyebrows": ["01 / TODO"],
+    "captions": ["TODO：一句话", "", ""],
+    // 交接：in = 这一拍进场的东西，out = 被它换下去的东西（秒）。
+    // beat_audit.py 会因此报出 GAP（先出后进）、过长窗口、弱交接。
+    "beats": [
+      { "name": "TODO 第一拍", "in": [0.2, 0.9] },
+      { "name": "TODO 第二拍，与第一拍重叠", "in": [0.8, 1.5], "out": [0.85, 1.25] }
+    ]
+  },
+
+  // 白底片不要在 look 里淡入淡出（那是从黑起）。要做就在场景内部做。
+  "look": {
+    "fade_in": 0,
+    "fade_out": 0,
+    "progress_bar": { "height": 3, "color": "#E1322A", "opacity": 0.85 }
+  }
+
+  // 音乐床：默认不配（没有轨道时 verify 不检查音频）。
+  // 要配就加回这个形状，目标 mean −45…−10 dB，不要用 loudnorm（会把床推到 −18 dB 左右）：
+  // "audio": { "tracks": [ { "src": "assets/bed.m4a", "gain_db": -8.5,
+  //                         "fade_in": 2, "fade_out": 3, "loop": true } ] }
+}

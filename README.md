@@ -329,6 +329,26 @@ hold 里的帧是复用的，所以那几秒在成片里照样存在，但只花
 
 凡引用之处都在文件末尾标了出处（书与作者），文件本身是重新组织的检查表，不是原文摘录。
 
+## 快手线与自检工具
+
+`scripts/` 下与 `vs.py` 并列的四个工具：
+
+| 工具 | 用途 |
+| --- | --- |
+| `scaffold.py` | 从 `assets/starter/` 生成可渲染工程：管线直接复用，只写这一支的构成；style seed 按工程名派生，可复现 |
+| `qc_video.py` | 批量抽帧 + 分区墨量 + ASCII 出图：在没有图像输入的环境里也能“看”画面，并抓出“渲染成功但内容是空的” |
+| `taste_check.py` | `--rhythm` 给节奏指标与柱状图（冻结帧比例、最长死拍、每秒变化、p90/均值）；`--stills` 给构图指标（留白、重心偏离、对称度、墨团、安全区） |
+| `beat_audit.py` | 审 `data.beats` 的交接：GAP / 弱交接 / 动作过长 / 内部空档，并打出时间轴图 |
+
+```bash
+python scripts/scaffold.py ./my-video --name my-video --duration 10
+python scripts/beat_audit.py my-video/project.json      # 渲染前：交接不过就别渲
+python scripts/qc_video.py --project my-video --times 2,4,6
+python scripts/taste_check.py my-video/my-video.mp4     # 渲染后：节奏 + 构图
+```
+
+三份配套文档：`references/taste.md`（审美闸门与 AI 味黑名单）、`references/rhythm-handoff.md`（“PPT 感”的三个根因与解法）、`references/motion-realism.md`（7 行运动设定、12 条真实感钩子、情绪→参数）。
+
 ## 高级技法提示词库
 
 [references/prompts.md](references/prompts.md) 是一份可以直接投喂给 AI 的提示词库（中文），
@@ -397,6 +417,7 @@ video-studio/
 ├─ LICENSE                  MIT（含第三方组件说明）
 ├─ agents/openai.yaml       界面元数据
 ├─ assets/
+│  ├─ starter/               可复用工程骨架（场景管线 + 工程模板）
 │  ├─ scenes/_blank.html    空白场景骨架（只有管线，没有任何设计）
 │  ├─ examples/             三个可运行示例工程
 │  ├─ palettes.json         配色预设
@@ -407,10 +428,17 @@ video-studio/
 │  ├─ formats.md            各种形态的做法
 │  ├─ prompts.md            高级技法提示词库（色彩色阶 / 外接动效库 / 设计分镜）
 │  ├─ choreography.md       编排规则：每拍现写画面，不套模板（含闸门与查重表）
+│  ├─ taste.md              审美闸门：比例/字号/色彩预算/参照体系/AI 味黑名单
+│  ├─ rhythm-handoff.md     “PPT 感”的三个根因与解法（重叠交接 / 共享元素 / 缩短整帧动作）
+│  ├─ motion-realism.md     7 行运动设定、12 条真实感钩子、情绪→参数
 │  └─ guide-zh.md           中文速查
 ├─ scripts/
 │  ├─ vs.py                 命令行入口
 │  ├─ render_segment.mjs    逐帧渲染器
+│  ├─ scaffold.py           从骨架生成工程
+│  ├─ qc_video.py           抽帧 / 分区墨量 / ASCII 出图
+│  ├─ taste_check.py        节奏（--rhythm）与构图（--stills）测量
+│  ├─ beat_audit.py         交接审计 + 时间轴图
 │  └─ lib/                  运行时探测、渲染编排、剪辑装配、验收、TTS、混剪等
 └─ vendor/                  首次运行自动下载的 ffmpeg（.gitignore 已忽略）
 ```
