@@ -58,6 +58,11 @@ python vs.py run 我的项目\project.json --jobs 3
 | 命令 | 用途 |
 | --- | --- |
 | `doctor [--install-ffmpeg]` | 环境检查 / 自动装 ffmpeg |
+| `brief --script 台词.txt --out brief.json` | **生成前完整规划**：分幕、分镜、视觉手段、图片提示词 |
+| `compile brief.json` | 校验规划并编译成可渲染的 project.json |
+| `style [--seed N] [--swatch f.png]` | 采样/查看一套视觉方向（配色、构图、动态） |
+| `setup --provider X --key K` | 配置图片生成（任意 OpenAI 兼容平台） |
+| `imagegen "提示词" --out f.png` | 生成单张图片，或生成工程里声明的全部图片 |
 | `probe <文件...>` | 看素材：尺寸、透明通道、主色、时长、音量 |
 | `sprite <图片> [--width 64 --height 96 --colors 12]` | 图片转像素精灵（含 1px 描边与阴影） |
 | `beats <音频> [--cuts 60]` | 节拍检测，给出剪辑点 |
@@ -74,6 +79,59 @@ python vs.py run 我的项目\project.json --jobs 3
 | `selftest` | 极小工程端到端回归自检 |
 
 ---
+
+## 一、先规划，再渲染
+
+`brief` 会产出一份完整且可编辑的设计文档；没写完就不让它开始渲染。
+
+```powershell
+python vs.py brief --script 台词.txt --out brief.json --platform douyin --tone "冷静专业" --seed 2024
+python vs.py compile brief.json --out project.json   # 校验 + 编译
+python vs.py plan project.json                        # 预算 + 多样性体检
+python vs.py run project.json
+```
+
+`brief.json`（机器读）与 `brief.md`（人读）里包含：目标平台与画幅、前提与承诺、**分镜表**（每一拍的幕、意图、口播、屏上文字、模板、视觉手段、时长）、**视觉方向**、每拍需要生成的图片提示词、音频方案、验收清单。
+
+“完整”是被强制执行的：`validate` 会对缺失意图、缺屏上文字、残留 TODO、相邻两拍模板与手段完全相同、前提/承诺未写直接报错；对首拍不是钩子、构图种类太少、估算时长偏离目标超过 25%、字幕行过长给出警告。
+
+## 二、避免同质化：每支片子有自己的视觉方向
+
+每个工程带一个**风格签名**（由种子决定）：调色板（经对比度校验）、字号与字距、构图池、入场动态池、转场池、纹理、节奏档位、圆角、描边风格、图片风格子句。同一种子完全可复现，换种子就是换一套审美。
+
+每拍轮换使用构图与动态，**相邻两拍不会撞构图**，强调色在调色板的和声里循环；节奏档位会整体加快/放慢入场速度并插入“呼吸”拍。
+
+```powershell
+python vs.py style --seed 2024 --swatch style.png   # 先看配色和方案
+python vs.py run project.json --seed 777            # 不改文件，直接换一套
+```
+
+`plan` 会给出多样性体检：用了多少种构图/动态/转场、相邻重复数（必须为 0）、以及与历史项目的最高相似度（签名记在 `~/.video-studio/history.json`）。
+
+单拍想指定构图，写在数据里即可：
+
+```jsonc
+"data": { "visual": { "layout": "fullbleed", "entrance": "wipe", "density": "minimal" } }
+```
+
+## 三、用 API 生成图片
+
+支持任何 OpenAI 兼容的图片接口（OpenAI、硅基流动、阿里云百炼、火山方舟、各类聚合平台）。密钥存在 `~/.video-studio/config.json`，不写进工程文件，所有命令输出里都会脱敏。
+
+```powershell
+python vs.py setup --presets                                 # 看内置平台预设
+python vs.py setup --provider siliconflow --key sk-xxxx --model Kwai-Kolors/Kolors
+python vs.py setup --provider custom --base-url https://你的聚合平台/v1 --path /images/generations --key sk-xxxx --model 模型名
+python vs.py setup --test 测试图.png                          # 立刻验证密钥可用
+```
+
+工程里把素材写成提示词，渲染前会自动生成（按提示词哈希缓存，不会重复花钱）：
+
+```jsonc
+"assets": { "subject": { "prompt": "黄昏屋顶上的一个人影", "size": "1536x1024" } }
+```
+
+整片共用一句 `image_style`（由风格签名给出）会拼在每个提示词后面，保证一组图看起来是一套。`imagegen --dry-run` 可以只看请求不发出去。
 
 ## 项目配置
 

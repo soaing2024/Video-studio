@@ -226,9 +226,13 @@ def validate(spec: dict) -> list[dict]:
         tpl = render_mod.template_path(seg["template"])
         if not tpl.is_file():
             add("error", seg["id"], f"template not found: {tpl}")
-        for name, path in (seg.get("assets") or {}).items():
-            if not Path(path).is_file():
-                add("error", seg["id"], f"asset '{name}' not found: {path}")
+        for name, value in (seg.get("assets") or {}).items():
+            if isinstance(value, dict):       # a prompt, generated before rendering
+                if not value.get("prompt"):
+                    add("error", seg["id"], f"asset '{name}' needs a prompt or a file path")
+                continue
+            if not Path(value).is_file():
+                add("error", seg["id"], f"asset '{name}' not found: {value}")
         if not seg.get("duration"):
             add("error", seg["id"], "duration is 0 or missing")
         if not (seg.get("data") or {}).get("still") and float(seg.get("duration") or 0) > 30:

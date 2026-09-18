@@ -37,6 +37,18 @@ class Verifier:
             attempt -= 0.1
         raise RuntimeError(f"could not extract a frame near {t:.2f}s from {path}")
 
+    def _tail_frames(self, path: str, seconds: float, tmp: Path) -> list[float]:
+        """Mean luma of the last few frames, decoded as a run so no seek can overshoot."""
+        import numpy as np
+        from PIL import Image
+        out = tmp / "tail"
+        out.mkdir(parents=True, exist_ok=True)
+        subprocess.run([self.ffmpeg, "-y", "-v", "error", "-sseof", f"-{seconds:.3f}",
+                        "-i", path, "-vf", "fps=8", str(out / "f%02d.png")], check=True)
+        return [float(np.asarray(Image.open(p).convert("RGB"), dtype=np.int16).mean())
+                for p in sorted(out.glob("f*.png"))]
+
+
     def run(self, video: str, samples: int = 5) -> dict:
         import numpy as np
         from PIL import Image
@@ -77,14 +89,27 @@ class Verifier:
             self.add("content", len(lit) >= needed,
                      f"{len(lit)}/{samples} sampled frames carry picture "
                      f"(need {needed}): luma {luma}")
+            # Fades are judged against the video's own brightness. An absolute cutoff is wrong
+            # twice over: at 30fps a seek to "just after 0" lands on frame two (already part-way
+            # into the ramp), and a bright grade would fail a fixed dark threshold.
+            body = float(np.median(lit)) if lit else 0.0
+            cutoff = max(6.0, 0.15 * body)
             if float(look.get("fade_in", 0) or 0) > 0:
-                first = self._frame(video, 0.01, tmp / "first.png")
+                first = self._frame(video, 0.0, tmp / "first.png")
                 m = float(np.asarray(first, dtype=np.int16).mean())
-                self.add("fade_in", m < 8, f"first frame luma {m:.1f}")
-            if float(look.get("fade_out", 0) or 0) > 0:
-                last = self._frame(video, max(0.0, duration - 0.05), tmp / "last.png")
-                m = float(np.asarray(last, dtype=np.int16).mean())
-                self.add("fade_out", m < 8, f"last frame luma {m:.1f}")
+                self.add("fade_in", m <= cutoff,
+                         f"first frame luma {m:.1f} vs body {body:.1f} (cutoff {cutoff:.1f})")
+            fo = float(look.get("fade_out", 0) or 0)
+            if fo > 0 and duration > fo + 0.4:
+                # The literal last frame is awkward to grab, and the content itself may still be
+                # animating, so compare the darkest tail frame against the level just before the
+                # ramp began.
+                before = self._frame(video, max(0.0, duration - fo - 0.2), tmp / "pre.png")
+                m_before = float(np.asarray(before, dtype=np.int16).mean())
+                tail = self._tail_frames(video, max(0.3, fo * 0.4), tmp)
+                m_tail = min(tail) if tail else m_before
+                self.add("fade_out", m_tail <= max(6.0, 0.5 * m_before),
+                         f"darkest tail frame {m_tail:.1f} vs {m_before:.1f} before the fade")
 
             if px:
                 worst = max(block) if block else 0.0

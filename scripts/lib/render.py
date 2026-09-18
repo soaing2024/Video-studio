@@ -13,7 +13,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from . import runtime, spec as specmod
+from . import imagegen, runtime, spec as specmod
 from .sprite import make_sprite
 
 TEMPLATES = runtime.SKILL_DIR / "assets" / "templates"
@@ -67,10 +67,16 @@ def cache_key(spec: dict, seg: dict) -> str:
     return _key(spec, seg, w, h)
 
 
-def prepare_assets(spec: dict, seg: dict) -> dict:
-    """Auto-build derived assets (pixel sprites) and return file:// URLs for the scene."""
+def prepare_assets(spec: dict, seg: dict, log=print) -> dict:
+    """Resolve every asset this segment needs: generated images, then pixel sprites."""
     assets = dict(seg.get("assets", {}))
     data = dict(seg.get("data", {}))
+
+    # {"hero": {"prompt": "..."}} -> generate once, cached by prompt hash
+    for name, value in list(assets.items()):
+        if isinstance(value, dict) and value.get("prompt"):
+            made = imagegen.resolve_prompt(spec, seg["id"], name, value, log=log)
+            assets[name] = made
     if seg["template"] == "pixel" and "sprite" not in assets and "subject" in assets:
         cfg = data.get("sprite", {})
         out = build_dir(spec) / "sprites" / f"{seg['id']}.png"

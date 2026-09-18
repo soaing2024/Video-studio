@@ -24,12 +24,18 @@ import sys
 import tempfile
 from pathlib import Path
 
+for _stream in (sys.stdout, sys.stderr):
+    try:  # the console codepage on Windows would otherwise mangle CJK JSON output
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 from lib import (  # noqa: E402
-    assemble, beats, montage, narrate, probe, render, runtime, sprite,
-    spec as specmod, tts, verify,
+    assemble, beats, brief as brief_mod, imagegen, montage, narrate, probe, render,
+    runtime, sprite, spec as specmod, style, tts, verify,
 )
 
 SKILL = runtime.SKILL_DIR
@@ -44,14 +50,18 @@ def _ffmpeg() -> str:
     return runtime.find_ffmpeg()
 
 
-def load_spec(path, want_narration: bool = True) -> dict:
-    """Load a project and resolve narration, so durations and the timeline agree.
+def load_spec(path, want_narration: bool = True, seed: int | None = None) -> dict:
+    """Load a project and resolve the two things that must agree across every command:
+    the visual direction (from the style seed) and the narration timing.
 
     `narrate --script` records the script next to the build output; if the project itself has no
     narration block, that record is reused here so `narrate` then `run` works without editing
     the project file (and without destroying its comments).
     """
     spec = specmod.load(path)
+    if seed is not None:
+        spec.setdefault("style", {})["seed"] = int(seed)
+    style.inject(spec)
     cfg = spec.setdefault("narration", {})
     if not cfg.get("lines"):
         manifest = render.build_dir(spec) / "voice" / "narration.json"
@@ -130,8 +140,144 @@ def cmd_init(args) -> int:
     return 0
 
 
+def spec_from(args) -> dict:
+    return load_spec(args.project, seed=getattr(args, "seed", None))
+
+
+def _write_swatch(sig: dict, path: str) -> str:
+    from PIL import Image, ImageDraw
+    cols = sig["colors"]
+    order = [("bg", 90), ("surface", 90), ("border", 60), ("dim", 90), ("text", 90),
+             ("accent", 120), ("accent2", 120), ("accent3", 120)]
+    im = Image.new("RGB", (980, 260), tuple(int(cols["bg"].lstrip('#')[i:i + 2], 16) for i in (0, 2, 4)))
+    d = ImageDraw.Draw(im)
+    x = 24
+    for key, w in order:
+        rgb = tuple(int(cols[key].lstrip('#')[i:i + 2], 16) for i in (0, 2, 4))
+        d.rectangle([x, 40, x + w - 12, 150], fill=rgb)
+        d.text((x, 160), key, fill=tuple(int(cols["dim"].lstrip('#')[i:i + 2], 16) for i in (0, 2, 4)))
+        x += w
+    d.text((24, 14), f"seed {sig['seed']} | {sig['palette_name']} | {sig['pacing']} | {sig['texture']}",
+           fill=tuple(int(cols["text"].lstrip('#')[i:i + 2], 16) for i in (0, 2, 4)))
+    d.text((24, 196), "layouts(k): " + ", ".join(sig["layouts"]["kinetic"]),
+           fill=tuple(int(cols["dim"].lstrip('#')[i:i + 2], 16) for i in (0, 2, 4)))
+    d.text((24, 216), "motions: " + ", ".join(sig["motions"]),
+           fill=tuple(int(cols["dim"].lstrip('#')[i:i + 2], 16) for i in (0, 2, 4)))
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    im.save(path)
+    return path
+
+
+def cmd_brief(args) -> int:
+    """Lay out the whole design before any rendering happens."""
+    if args.script:
+        raw = Path(args.script).read_text(encoding="utf-8").splitlines()
+        lines = [ln.strip() for ln in raw if ln.strip() and not ln.strip().startswith("#")]
+        name = args.name or Path(args.script).stem
+        brief = brief_mod.from_script(
+            lines, name=name, duration=args.duration, platform=args.platform,
+            tone=args.tone or "", audience=args.audience or "",
+            want_images=not args.no_images, image_size=args.image_size,
+            seed=args.seed, music=args.music, voice=args.voice)
+    else:
+        brief = brief_mod.skeleton(args.topic or "untitled", beats=args.beats,
+                                   duration=args.duration or 60, platform=args.platform,
+                                   want_images=not args.no_images, seed=args.seed)
+    report = brief_mod.plan_report(brief)
+    if args.out:
+        report.update(brief_mod.save(brief, args.out))
+    else:
+        report["brief"] = brief
+    report["beats_summary"] = [
+        {"id": b["id"], "act": b["act"], "template": b["template"],
+         "device": b["visual_device"], "seconds": b["seconds"]} for b in brief["structure"]]
+    emit(report)
+    return 0 if not [i for i in report["issues"] if i["level"] == "error"] else 1
+
+
+def cmd_compile(args) -> int:
+    """Validate a brief and turn it into a renderable project."""
+    brief = brief_mod.load(args.brief)
+    issues = brief_mod.validate(brief)
+    errors = [i for i in issues if i["level"] == "error"]
+    if errors and not args.force:
+        emit({"ok": False, "issues": issues,
+              "hint": "fix the errors, or pass --force to compile anyway"})
+        return 1
+    spec = brief_mod.compile_brief(brief, music=args.music,
+                                   progress_bar=not args.no_progress)
+    out = Path(args.out) if args.out else Path(args.brief).with_name("project.json")
+    out.write_text(json.dumps(spec, ensure_ascii=False, indent=2), encoding="utf-8")
+    emit({"ok": True, "project": str(out), "segments": len(spec["segments"]),
+          "narration_lines": len(spec.get("narration", {}).get("lines", [])),
+          "images": sum(1 for s in spec["segments"] for v in s["assets"].values()
+                        if isinstance(v, dict)),
+          "style_seed": spec["style"]["seed"],
+          "warnings": [i for i in issues if i["level"] == "warning"]})
+    return 0
+
+
+def cmd_setup(args) -> int:
+    """Configure image generation. With no flags it reports the current state."""
+    if args.presets:
+        emit({k: {kk: vv for kk, vv in v.items() if kk != "api_key"}
+              for k, v in imagegen.PRESETS.items()})
+        return 0
+    if not args.provider or not args.key:
+        emit(imagegen.describe())
+        return 0
+    cfg = imagegen.configure(args.provider, args.key, base_url=args.base_url,
+                             model=args.model, size=args.size, path=args.path)
+    report = imagegen.describe(cfg)
+    if args.test:
+        probe_path = Path(args.test)
+        report["test"] = imagegen.generate("a simple grey circle on a dark background",
+                                          str(probe_path), cfg=cfg)
+    emit(report)
+    return 0
+
+
+def cmd_imagegen(args) -> int:
+    """Generate one image, or every image a project/brief asks for."""
+    if args.from_project:
+        spec = spec_from(args)
+        if args.dry_run:
+            pending = [{"segment": s["id"], "asset": k, "prompt": v["prompt"]}
+                       for s in spec.get("segments", [])
+                       for k, v in (s.get("assets") or {}).items()
+                       if isinstance(v, dict) and v.get("prompt")]
+            emit({"dry_run": True, "configured": imagegen.describe(), "pending": pending})
+            return 0
+        made = imagegen.resolve_assets(spec, log=lambda m: print(m, file=sys.stderr))
+        emit({"generated": made, "count": len(made)})
+        return 0
+
+    if not args.prompt or not args.out:
+        print("error: give a prompt and --out, or use --from-project", file=sys.stderr)
+        return 2
+    emit(imagegen.generate(args.prompt, args.out, size=args.size, n=args.n,
+                          negative=args.negative, dry_run=args.dry_run))
+    return 0
+
+
+def cmd_style(args) -> int:
+    sig = style.make_signature(args.seed, topic=args.topic)
+    out = {"signature": sig}
+    if args.swatch:
+        out["swatch"] = _write_swatch(sig, args.swatch)
+    if args.like:
+        out["similarity_to_like"] = style.similarity(sig, style.make_signature(args.like))
+    if args.history:
+        past = style.load_history()
+        out["closest_past"] = sorted(
+            ({"name": e.get("name"), "similarity": style.similarity(sig, e.get("signature") or {})}
+             for e in past), key=lambda r: -r["similarity"])[:3]
+    emit(out)
+    return 0
+
+
 def cmd_render(args) -> int:
-    spec = load_spec(args.project)
+    spec = spec_from(args)
     ffmpeg, node = _ffmpeg(), runtime.find_node()
     results = render.render_all(spec, ffmpeg, node, jobs=args.jobs, force=args.force)
     emit({"segments": results, "build_dir": str(render.build_dir(spec))})
@@ -139,20 +285,20 @@ def cmd_render(args) -> int:
 
 
 def cmd_assemble(args) -> int:
-    spec = load_spec(args.project)
+    spec = spec_from(args)
     emit(assemble.assemble(spec, _ffmpeg(), out_path=args.out))
     return 0
 
 
 def cmd_verify(args) -> int:
-    spec = load_spec(args.project)
+    spec = spec_from(args)
     report = verify.verify(spec, _ffmpeg(), video=args.video, samples=args.samples)
     emit(report)
     return 0 if report["ok"] else 1
 
 
 def cmd_preview(args) -> int:
-    spec = load_spec(args.project)
+    spec = spec_from(args)
     seg = specmod.segment_map(spec).get(args.segment) if args.segment else spec["segments"][0]
     if not seg:
         print(f"unknown segment {args.segment}", file=sys.stderr)
@@ -179,7 +325,7 @@ def cmd_preview(args) -> int:
 
 
 def cmd_run(args) -> int:
-    spec = load_spec(args.project)
+    spec = spec_from(args)
     ffmpeg, node = _ffmpeg(), runtime.find_node()
     log = (lambda m: print(m, file=sys.stderr)) if args.quiet else (lambda m: print(m, file=sys.stderr))
     print(f"[1/3] render {len(render.pending(spec))} segment(s)", file=sys.stderr)
@@ -242,7 +388,7 @@ def cmd_montage(args) -> int:
 
 
 def cmd_plan(args) -> int:
-    spec = load_spec(args.project)
+    spec = spec_from(args)
     issues = specmod.validate(spec)
     w, h, scale = render.work_size(spec)
     fps = spec["video"]["fps"]
@@ -282,6 +428,7 @@ def cmd_plan(args) -> int:
         "estimated_render": {"jobs": jobs, "seconds": round(seconds, 1),
                              "minutes": round(seconds / 60, 1)},
         "output": str(Path(spec["base_dir"]) / (spec["name"] + ".mp4")),
+        "style": style.report(spec),
         "issues": issues,
         "ok": not errors,
     })
@@ -373,6 +520,7 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("project")
     r.add_argument("--jobs", type=int)
     r.add_argument("--force", action="store_true")
+    r.add_argument("--seed", type=int, help="override the style seed for this render")
     r.set_defaults(func=cmd_render)
 
     a = sub.add_parser("assemble", help="cut, transition, mix and encode into the final file")
@@ -390,6 +538,7 @@ def build_parser() -> argparse.ArgumentParser:
     pv.add_argument("project")
     pv.add_argument("--segment")
     pv.add_argument("--at", type=float, default=2.0)
+    pv.add_argument("--seed", type=int, help="override the style seed")
     pv.add_argument("--out")
     pv.set_defaults(func=cmd_preview)
 
@@ -400,7 +549,63 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--skip-verify", action="store_true")
     run.add_argument("--samples", type=int, default=5)
     run.add_argument("--quiet", action="store_true")
+    run.add_argument("--seed", type=int, help="override the style seed")
     run.set_defaults(func=cmd_run)
+
+    st = sub.add_parser("style", help="sample or inspect a visual direction")
+    st.add_argument("--seed", type=int)
+    st.add_argument("--topic", help="derive the seed from this text")
+    st.add_argument("--swatch", help="write a palette swatch PNG here")
+    st.add_argument("--like", type=int, help="similarity against another seed")
+    st.add_argument("--history", action="store_true", help="compare against past projects")
+    st.set_defaults(func=cmd_style)
+
+    su = sub.add_parser("setup", help="configure image generation (any OpenAI-compatible API)")
+    su.add_argument("--provider", help="preset name, or custom")
+    su.add_argument("--key", help="API key (stored outside the repo)")
+    su.add_argument("--base-url")
+    su.add_argument("--model")
+    su.add_argument("--size")
+    su.add_argument("--path", help="endpoint path, default /images/generations")
+    su.add_argument("--presets", action="store_true", help="list known provider presets")
+    su.add_argument("--test", help="generate one image here to verify the key works")
+    su.set_defaults(func=cmd_setup)
+
+    bf = sub.add_parser("brief", help="plan the whole video before rendering anything")
+    bf.add_argument("--script", help="narration script, one line per beat")
+    bf.add_argument("--topic", help="plan a skeleton for this topic instead")
+    bf.add_argument("--out", help="write brief.json (and a readable .md) here")
+    bf.add_argument("--name")
+    bf.add_argument("--beats", type=int, default=6, help="skeleton beat count")
+    bf.add_argument("--duration", type=float, help="target seconds")
+    bf.add_argument("--platform", default="youtube", choices=sorted(brief_mod.PLATFORMS))
+    bf.add_argument("--tone")
+    bf.add_argument("--audience")
+    bf.add_argument("--seed", type=int, help="fix the visual direction")
+    bf.add_argument("--music")
+    bf.add_argument("--voice")
+    bf.add_argument("--image-size", default="1536x1024")
+    bf.add_argument("--no-images", action="store_true", help="plan without generated images")
+    bf.set_defaults(func=cmd_brief)
+
+    cp = sub.add_parser("compile", help="validate a brief and emit project.json")
+    cp.add_argument("brief")
+    cp.add_argument("--out")
+    cp.add_argument("--music")
+    cp.add_argument("--no-progress", action="store_true")
+    cp.add_argument("--force", action="store_true", help="compile despite errors")
+    cp.set_defaults(func=cmd_compile)
+
+    ig = sub.add_parser("imagegen", help="generate images with the configured provider")
+    ig.add_argument("prompt", nargs="?")
+    ig.add_argument("--out")
+    ig.add_argument("--size")
+    ig.add_argument("--n", type=int, default=1)
+    ig.add_argument("--negative", help="negative prompt, when the provider supports it")
+    ig.add_argument("--from-project", help="generate every prompt-backed asset in a project")
+    ig.add_argument("--seed", type=int)
+    ig.add_argument("--dry-run", action="store_true", help="print the request without sending it")
+    ig.set_defaults(func=cmd_imagegen)
 
     vo = sub.add_parser("voices", help="list installed speech voices (for narration)")
     vo.set_defaults(func=cmd_voices)
@@ -427,6 +632,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     pl = sub.add_parser("plan", help="dry run: problems, cache hits, estimated render time")
     pl.add_argument("project")
+    pl.add_argument("--seed", type=int, help="override the style seed")
     pl.set_defaults(func=cmd_plan)
 
     st = sub.add_parser("selftest", help="run a tiny project end to end")

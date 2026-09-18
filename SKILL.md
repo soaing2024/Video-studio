@@ -21,6 +21,11 @@ verifies `libx264` on purpose. Report anything `doctor` flags instead of working
 
 ## Pipeline
 
+For anything bigger than one idea, start a step earlier: write the narration, run `brief` to lay
+out acts, per-beat intent, on-screen text, visual devices and image prompts, then `compile` it
+into a project. `plan` then reports the render budget and a distinctiveness verdict before any
+render time is spent.
+
 1. `probe` the source assets: size, alpha coverage, dominant colours, duration, loudness.
 2. Write a project spec (JSON; `//` comments allowed).
 3. `preview` a still frame per segment while iterating on design - seconds per look, not minutes.
@@ -32,6 +37,11 @@ verifies `libx264` on purpose. Report anything `doctor` flags instead of working
 | command | use it for |
 | --- | --- |
 | `doctor [--install-ffmpeg]` | runtime check: node, playwright, chromium, ffmpeg codecs, python deps |
+| `brief --script s.txt --out brief.json` | plan the whole video before rendering anything |
+| `compile brief.json` | validate a brief and emit project.json |
+| `style [--seed N] [--swatch f.png]` | sample or inspect a visual direction |
+| `setup --provider X --key K` | configure image generation (any OpenAI-compatible API) |
+| `imagegen "prompt" --out f.png` | generate one image, or every image a project needs |
 | `probe <files...>` | decide how to use an asset |
 | `sprite <image> [--width 64 --height 96 --colors 12]` | image to pixel-art sprite plus shadow |
 | `beats <audio> [--cuts 60]` | beat times and montage cut points |
@@ -120,4 +130,6 @@ path as `template` when none of the three fit.
 - Recipes for montage, short-form, long-form, explainer and pixel styles, including beat-synced
   cutting and vertical framing: [references/formats.md](references/formats.md).
 - Chinese manual for the human operator: [README.md](README.md) (long form) and
-  [references/guide-zh.md](references/guide-zh.md) (one-page cheat sheet).
+[references/guide-zh.md](references/guide-zh.md) (one-page cheat sheet).
+- Planning, visual distinctiveness and generated imagery:
+  [references/creative.md](references/creative.md).
