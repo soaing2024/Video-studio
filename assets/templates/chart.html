@@ -210,6 +210,9 @@ window.addEventListener("resize", () => { L = build(); });
 window.__sceneReady = true;
 
 window.seek = (t) => {
+  // Every element the beat sheet animates is created at opacity 0 and only ever becomes visible
+  // through this call. Skipping it renders the background and nothing else.
+  L.scene.seek(t, null);
   const fadeOut = 1 - Anim.EASE.out(Math.min(1, Math.max(0, (t - (D - 0.45)) / 0.45)));
   const bump = L.cam.apply(t);
   L.blobs.forEach(b => b.render(t));

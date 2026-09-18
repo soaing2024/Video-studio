@@ -13,6 +13,48 @@ from pathlib import Path
 from . import probe, spec as specmod
 
 
+# Keys the templates read for on-screen copy. A segment that declares any of them is promising
+# the viewer something to read, so the delivered frame has to show ink.
+TEXT_KEYS = ("title", "eyebrow", "subtitle", "caption", "quote", "author", "label",
+             "footer", "cn")
+LIST_KEYS = ("rows", "lines", "series", "cards")
+
+
+def declares_text(data) -> bool:
+    """Does this segment's data promise something on screen?"""
+    if not isinstance(data, dict):
+        return False
+    for key in TEXT_KEYS:
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return True
+    if isinstance(data.get("value"), (int, float)):
+        return True
+    for key in LIST_KEYS:
+        value = data.get(key)
+        if isinstance(value, list) and value:
+            return True
+    return False
+
+
+def sharp_edge_density(im) -> float:
+    """Share of pixels sitting on a hard luma step.
+
+    Type and vector shapes produce these in bulk; gradients, grain and photographic content
+    mostly do not. This is what separates a frame that drew its content from one that only
+    drew the background, at any brightness the grade happens to land on.
+    """
+    import numpy as np
+
+    gray = np.asarray(im.convert("L"), dtype=np.int16)
+    dx = np.abs(np.diff(gray, axis=1))
+    dy = np.abs(np.diff(gray, axis=0))
+    edge = np.zeros(gray.shape, dtype=np.int16)
+    edge[:, :-1] += dx
+    edge[:-1, :] += dy
+    return float((edge > 40).mean())
+
+
 class Verifier:
     def __init__(self, spec: dict, ffmpeg: str):
         self.spec = spec
@@ -56,6 +98,53 @@ class Verifier:
         frames = buf[:n * frame].reshape(n, 108, 192).astype(np.int16)
         return np.abs(frames[lag:] - frames[:-lag]).mean(axis=(1, 2)).tolist()
 
+    # Calibrated against real output: a frame that drew type or vector shapes measures 0.005 and
+    # up, a frame carrying only background (gradient, grain, particles, blur) stays under 0.0002,
+    # and the softest photographic stills at the same size land around 0.004. The floor sits in
+    # the gap between them.
+    DETAIL_MIN = 0.001
+    DETAIL_SAMPLES = 8
+
+    def _check_written_content(self, video: str, tmp: Path):
+        """Every beat that promises on-screen copy has to actually put ink on the screen."""
+        starts = specmod.segment_starts(self.spec)
+        seg_map = specmod.segment_map(self.spec)
+
+        first_item: dict[str, dict] = {}
+        for item in self.spec.get("timeline", []):
+            sid = item.get("segment")
+            if sid and sid not in first_item:
+                first_item[sid] = item
+
+        wanted = []
+        for sid, start in starts.items():
+            seg = seg_map.get(sid) or {}
+            if sid in first_item and declares_text(seg.get("data") or {}):
+                wanted.append((sid, start, first_item[sid]))
+        if not wanted:
+            return
+
+        # A long video has dozens of these and the failure is never one single beat, so sample
+        # evenly across the timeline instead of paying for every one of them.
+        count = min(self.DETAIL_SAMPLES, len(wanted))
+        picks = ([0] if count == 1 else
+                 [round(i * (len(wanted) - 1) / (count - 1)) for i in range(count)])
+        sampled = [wanted[i] for i in picks]
+
+        rows = []
+        for i, (sid, start, item) in enumerate(sampled):
+            # past the entrance, before the exit fade: the frame the viewer actually reads
+            at = start + 0.6 * specmod.item_length(self.spec, item)
+            im = self._frame(video, at, tmp / f"detail{i}.png")
+            rows.append((sid, round(sharp_edge_density(im), 5)))
+
+        worst = min(d for _, d in rows)
+        shown = ", ".join(f"{sid} {d:.5f}" for sid, d in rows)
+        self.add("content_detail", worst >= self.DETAIL_MIN,
+                 f"edge density per sampled beat (need {self.DETAIL_MIN}): {shown}"
+                 + (" - these beats put no ink on screen: check that the segment's template"
+                    " drives its keyframed elements, and that the data holds what it promises"
+                    if worst < self.DETAIL_MIN else ""))
 
     def _tail_frames(self, path: str, seconds: float, tmp: Path) -> list[float]:
         """Mean luma of the last few frames, decoded as a run so no seek can overshoot."""
@@ -142,6 +231,11 @@ class Verifier:
                 want = int(px.get("colors", 16))
                 self.add("palette", max(qerr or [0]) < 6.0,
                          f"mean error when re-quantising to {want} colours: {qerr}")
+            # A frame can carry the background and none of the content. Luma cannot tell the
+            # difference - a dark gradient reads as "picture" - so segments that promise
+            # on-screen copy are held to a sharper standard. This is the check that catches a
+            # template animating elements it never drives, or a beat whose copy went missing.
+            self._check_written_content(video, tmp)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 

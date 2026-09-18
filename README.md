@@ -299,6 +299,7 @@ python vs.py run 混剪.json
 | `duration` | 转场偏移算错、段落丢了或重复 |
 | `resolution` | 渲染尺寸不对、被静默缩放 |
 | `content` | 全黑、素材没加载进来 |
+| `content_detail` | 该有字的段落一个字都没画（模板没驱动它的动画元素） |
 | `fade_in` / `fade_out` | 淡入淡出根本没生效（时长算错时很常见） |
 | `pixel_blocks` | 用双线性放大冒充最近邻（像素风破功） |
 | `palette` | 限色没生效（把帧重新量化到目标色数，量误差） |

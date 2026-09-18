@@ -97,6 +97,7 @@ the subject into an offscreen canvas, switch to `source-atop`, fill the gradient
 | `duration` vs planned | transition offset maths, dropped or duplicated clips |
 | `resolution` | wrong render size, silent rescale |
 | `content` luma of sampled frames | black video, missing media |
+| `content_detail` hard-edge density per beat | a beat that declares on-screen copy drew none of it - luma alone cannot see this, because a dark gradient passes as picture |
 | `fade_in` / `fade_out` | fades that start past the end because the duration was wrong |
 | `pixel_blocks` | bilinear instead of nearest upscaling |
 | `palette` | re-quantisation error vs the requested palette size |
@@ -143,6 +144,13 @@ segments for re-runs.
    instead of splitting on `//`.
 8. **`-shortest` is required when audio and video are mapped together**, otherwise a looping music
    track can extend the file past the last video frame.
+9. **A template that never drives its keyframed actors renders the background and nothing else.**
+   Every element a beat sheet animates is created at `opacity: 0` and only becomes visible
+   through `scene.seek(t, null)`; `stat`, `chart`, `terminal` and `quote` were all missing that
+   call at once, and the delivered file showed no text at all. Every check passed anyway - the
+   gradient background is "picture" by luma - which is why `verify` now measures hard-edge
+   density per beat and `selftest` exercises all seven templates instead of the two that
+   happened to work.
 
 ## 10. Extending it
 

@@ -38,9 +38,13 @@ python vs.py run 我的项目\project.json --jobs 3
 | `kinetic` | 开场、章节页、片尾；6-10 秒最好 | `eyebrow` `title` `subtitle` `rows` `callout` |
 | `caption` | 解说、口播、长视频正文 | `chapter` `title` `rows` `caption` |
 | `pixel` | 像素风；自动把图片转成精灵 | `title` `cn` `sprite` `rows` |
+| `stat` | 大数字计数，短视频钩子 | `value` `decimals` `suffix` `label` |
+| `quote` | 金句 / 停顿卡 | `quote` `author` `source` |
+| `terminal` | 技术解说、代码演示 | `lines[{text,kind}]` `cards[{label,value}]` |
+| `chart` | 数据条形图 | `chart{unit,max}` `series[{label,value,color}]` |
 
-三个模板都认同一套字段，缺什么就跳过什么。要加自己的样式，就复制一份模板 HTML，
-保持 `window.seek(t)` 这个约定即可。
+七个模板都认同一套字段，缺什么就跳过什么。要加自己的样式，就复制一份模板 HTML，
+保持 `window.seek(t)` 这个约定、并在里面调用 `scene.seek(t, null)` 驱动动画元素即可。
 
 ## 长视频的关键：静态段落
 
@@ -105,7 +109,7 @@ python vs.py beats assets/track.mp3 --cuts 45 --min-len 0.8
 
 ## 出片前检查
 
-1. `verify` 全绿：时长、分辨率、内容、淡入淡出、色板、音量。
+1. `verify` 全绿：时长、分辨率、内容、内容细节（该有字的段落真的画出了字）、淡入淡出、色板、音量。
 2. 每个章节抽一帧看一眼，不要只看第一帧。
 3. 章节编号 1..N 连续，和最后一段里的 `total` 对得上。
 4. 相邻两段背景太像的话，接缝会像失误，给个 0.4-0.6 秒交叉淡化。

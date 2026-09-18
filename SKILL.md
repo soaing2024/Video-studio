@@ -50,11 +50,15 @@ render time is spent.
 | `icons add <name>... [--preset core]` | vendor icons into a template-loadable catalog |
 | `icons list` | what the catalog holds now (offline) |
 | `init <dir> [--template starter\|short\|longform]` | scaffold a project |
+| `plan <project>` | dry run: problems, cache hits, budget, distinctiveness |
+| `montage <folder> --music f.mp3 --out p.json` | beat-cut montage project from a folder |
+| `voices` / `narrate <project> --script s.txt` | list voices, or synthesize narration and time the visuals to it |
 | `preview <project> [--segment id] [--at 2.0]` | one still frame, fast design loop |
 | `render <project> [--jobs N] [--force]` | render segments only (cached) |
 | `assemble <project> [--out f.mp4]` | cut, transition, mix, encode only |
 | `verify <project>` | measured acceptance report |
 | `run <project> [--jobs N]` | all three, prints a JSON summary |
+| `selftest` | end-to-end regression check, one beat per template |
 
 `run` and `verify` exit non-zero when a check fails. Read the failing `detail` - it names the knob to
 turn.
@@ -125,6 +129,10 @@ path as `template` when none of the three fit.
   the same as a 1s clip. Use it for talking-head and slide sections of long videos.
 - **Every animated value must be a pure function of `t`.** No CSS transitions, no
   `requestAnimationFrame`, no wall-clock time inside a scene.
+- **Drive the scene, or the shot renders empty.** A template creates every animated element at
+  `opacity: 0` and only turns it visible through `scene.seek(t, null)` inside `window.seek(t)`.
+  Omitting that call still produces a plausible-looking frame - background, grain and all - and
+  only `verify`'s `content_detail` catches it.
 - **Pixel look:** render at `width/scale` and let the assembler upscale with nearest. Keep motion on
   whole pixels - sub-pixel movement destroys the style once magnified.
 - **Audio levels:** a music bed should measure a mean of roughly -45 to -10 dB in `verify`; voice

@@ -513,14 +513,32 @@ SELFTEST_PROJECT = {
     "look": {"accent": "#e0455f", "pixelate": {"scale": 2, "colors": 16},
              "fade_in": 0.3, "fade_out": 0.3, "progress_bar": {"height": 2}},
     "segments": [
-        {"id": "a", "template": "kinetic", "duration": 2.0,
+        # One beat per template. A template that draws no text still passes a luma check - the
+        # background alone reads as picture - so the only way this stays a regression test is
+        # to exercise every template and let verify's content_detail check hold them to it.
+        {"id": "kinetic", "template": "kinetic", "duration": 2.0,
          "data": {"eyebrow": "SELFTEST", "title": "render ok",
                   "rows": [{"label": "A", "value": "one", "weight": 1.0}]}},
-        {"id": "b", "template": "caption", "duration": 2.0,
-         "data": {"still": True, "title": "hold ok", "caption": "still segment"}}
+        {"id": "caption", "template": "caption", "duration": 2.0,
+         "data": {"still": True, "title": "hold ok", "caption": "still segment"}},
+        {"id": "stat", "template": "stat", "duration": 2.0,
+         "data": {"value": 87.5, "decimals": 1, "suffix": "%", "label": "count ok"}},
+        {"id": "quote", "template": "quote", "duration": 2.0,
+         "data": {"quote": "quote ok", "author": "selftest"}},
+        {"id": "terminal", "template": "terminal", "duration": 2.0,
+         "data": {"lines": [{"text": "$ vs.py selftest", "kind": "cmd"},
+                            {"text": "verify ok", "kind": "ok"}]}},
+        {"id": "chart", "template": "chart", "duration": 2.0,
+         "data": {"chart": {"unit": "%", "max": 100},
+                  "series": [{"label": "one", "value": 40, "color": "#e0455f"},
+                             {"label": "two", "value": 70, "color": "#38bdf8"}]}},
+        {"id": "pixel", "template": "pixel", "duration": 2.0,
+         "data": {"title": "pixel ok", "cn": "像素自检"}},
     ],
-    "timeline": [{"segment": "a"},
-                 {"segment": "b", "transition": {"type": "fade", "duration": 0.4}}],
+    "timeline": [{"segment": "kinetic"},
+                 {"segment": "caption", "transition": {"type": "fade", "duration": 0.4}},
+                 {"segment": "stat"}, {"segment": "quote"}, {"segment": "terminal"},
+                 {"segment": "chart"}, {"segment": "pixel"}],
 }
 
 
@@ -530,8 +548,10 @@ def cmd_selftest(args) -> int:
     note = lambda m: print(m, file=sys.stderr)
     try:
         ffmpeg, node = _ffmpeg(), runtime.find_node()
+        # The bed outlasts the picture, so a short music track can never be what makes the
+        # duration check look wrong.
         subprocess.run([ffmpeg, "-y", "-v", "error", "-f", "lavfi", "-i",
-                        "sine=frequency=220:duration=8", "-af", "volume=0.25",
+                        "sine=frequency=220:duration=20", "-af", "volume=0.25",
                         str(tmp / "bed.wav")], check=True)
         spec_dict = json.loads(json.dumps(SELFTEST_PROJECT))
         spec_dict["audio"] = {"tracks": [{"src": "bed.wav", "gain_db": -6, "loop": True,
@@ -539,7 +559,7 @@ def cmd_selftest(args) -> int:
         project = tmp / "project.json"
         project.write_text(json.dumps(spec_dict, indent=2), encoding="utf-8")
         spec = specmod.load(str(project))
-        render.render_all(spec, ffmpeg, node, jobs=int(args.jobs or 2), force=True, log=note)
+        render.render_all(spec, ffmpeg, node, jobs=int(args.jobs or 4), force=True, log=note)
         result = assemble.assemble(spec, ffmpeg, log=note)
         report = verify.verify(spec, ffmpeg, video=result["output"], samples=3)
         emit({"ok": report["ok"], "video": result["output"],
