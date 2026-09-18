@@ -35,7 +35,8 @@ sys.path.insert(0, str(HERE))
 
 from lib import (  # noqa: E402
     assemble, beats, brief as brief_mod, choreography, imagegen, montage, motion,
-    narrate, probe, render, runtime, sprite, spec as specmod, style, tts, verify,
+    icons as icons_mod, narrate, probe, render, runtime, sprite, spec as specmod, style,
+    tts, verify,
 )
 
 SKILL = runtime.SKILL_DIR
@@ -105,6 +106,62 @@ def cmd_sprite(args) -> int:
         Path(args.image).with_name(Path(args.image).stem + "-pixel.png")
     report = sprite.make_sprite(args.image, str(out), width=args.width, height=args.height,
                                colors=args.colors, alpha_cutoff=args.alpha_cutoff)
+    emit(report)
+    return 0
+
+
+def cmd_icons(args) -> int:
+    """Vendor icon sets into a catalog that templates load with a plain <script src>.
+
+    Build-time only: `add` and `search` download the package once into the icon cache, and
+    the render path stays offline. `list` never touches the network.
+    """
+    if args.icons_cmd == "sets":
+        emit({name: {"package": spec["package"], "license": spec["license"],
+                      "homepage": spec["homepage"], "style": spec["style"]}
+              for name, spec in icons_mod.SETS.items()})
+        return 0
+
+    if not args.icons_cmd:
+        print("usage: vs.py icons {sets|list|search|add} ...\n"
+              "  sets                      which sets can be vendored\n"
+              "  search <query>            find icons by name or tag (downloads once)\n"
+              "  add <name>... [--preset core]   write them into the catalog\n"
+              "  list                      what the catalog holds now (no network)",
+              file=sys.stderr)
+        return 1
+
+    set_name = args.set or "lucide"
+    catalog = Path(args.catalog).expanduser() if args.catalog else None
+
+    if args.icons_cmd == "list":
+        path = catalog or icons_mod.default_catalog(set_name)
+        data = icons_mod.read_catalog(path)
+        names = sorted(data.get("icons") or {})
+        emit({"catalog": str(path), "exists": path.is_file(), "set": data.get("set"),
+              "version": data.get("version"), "license": data.get("license"),
+              "count": len(names), "icons": names})
+        return 0
+
+    try:
+        loaded = icons_mod.load_set(set_name, refresh=args.refresh)
+    except icons_mod.IconError as exc:
+        print(f"icons: {exc}", file=sys.stderr)
+        return 1
+
+    if args.icons_cmd == "search":
+        hits = icons_mod.search(loaded, args.query, limit=args.limit)
+        emit({"set": set_name, "version": loaded["version"], "license": loaded["license"],
+              "query": args.query, "matches": hits, "count": len(hits),
+              "catalog_total": len(loaded["icons"])})
+        return 0
+
+    try:
+        report = icons_mod.add(args.names, set_name=set_name, catalog=catalog,
+                               preset=args.preset, refresh=args.refresh)
+    except icons_mod.IconError as exc:
+        print(f"icons: {exc}", file=sys.stderr)
+        return 1
     emit(report)
     return 0
 
@@ -506,6 +563,33 @@ def build_parser() -> argparse.ArgumentParser:
     pr = sub.add_parser("probe", help="inspect images / audio / video")
     pr.add_argument("files", nargs="+")
     pr.set_defaults(func=cmd_probe)
+
+    ic = sub.add_parser("icons", help="vendor icon sets for templates (build-time; renders stay offline)")
+    ic.set_defaults(func=cmd_icons, icons_cmd=None, set="lucide", catalog=None,
+                    refresh=False, limit=40, names=[], preset=None, query=None)
+    ics = ic.add_subparsers(dest="icons_cmd")
+    ic_sets = ics.add_parser("sets", help="list the icon sets this tool can vendor")
+    ic_sets.set_defaults(func=cmd_icons, set="lucide", catalog=None, refresh=False, limit=40,
+                       names=[], preset=None)
+    ic_list = ics.add_parser("list", help="show what a catalog already holds (no network)")
+    ic_list.add_argument("--catalog", help="default: assets/icons/<set>.js in the skill")
+    ic_list.add_argument("--set", default="lucide", choices=sorted(icons_mod.SETS))
+    ic_list.set_defaults(func=cmd_icons, refresh=False, limit=40, names=[], preset=None)
+    ic_search = ics.add_parser("search", help="search a set by name or tag (downloads once)")
+    ic_search.add_argument("query")
+    ic_search.add_argument("--set", default="lucide", choices=sorted(icons_mod.SETS))
+    ic_search.add_argument("--limit", type=int, default=40)
+    ic_search.add_argument("--catalog")
+    ic_search.add_argument("--refresh", action="store_true")
+    ic_search.set_defaults(func=cmd_icons, names=[], preset=None)
+    ic_add = ics.add_parser("add", help="vendor icons into a catalog file")
+    ic_add.add_argument("names", nargs="*", help="icon names, e.g. gauge film badge-check")
+    ic_add.add_argument("--set", default="lucide", choices=sorted(icons_mod.SETS))
+    ic_add.add_argument("--preset", choices=sorted(icons_mod.PRESETS),
+                       help="a curated bundle, e.g. core = what a video tool reaches for")
+    ic_add.add_argument("--catalog", help="default: assets/icons/<set>.js in the skill")
+    ic_add.add_argument("--refresh", action="store_true", help="re-download the package")
+    ic_add.set_defaults(func=cmd_icons, limit=40)
 
     sp = sub.add_parser("sprite", help="convert an image into a pixel-art sprite")
     sp.add_argument("image")

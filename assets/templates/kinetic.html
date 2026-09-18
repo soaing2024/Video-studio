@@ -21,6 +21,8 @@
 </div>
 <script src="../runtime/anim.js"></script>
 <script src="../runtime/kit.js"></script>
+<script src="../icons/lucide.js"></script>
+<script src="../runtime/icons.js"></script>
 <script>
 // kinetic: shots are choreographed, not decorated. SCENE.choreography is a beat sheet; every beat
 // moves material that is already on screen (transform, swap, reveal, count, shuffle) so the frame
@@ -37,6 +39,11 @@ const C = Object.assign({
   dim: "#93a3bd", accent: "#e0455f", accent2: "#38bdf8", accent3: "#a78bfa",
   series: ["#e0455f", "#38bdf8", "#a78bfa", "#4ade80"]
 }, V.colors || {});
+
+// Optional icons: `eyebrowIcon` and per-row `icon` name an icon from assets/icons/<set>.js
+// (see `vs.py icons`). Nothing changes unless a field asks for it, and an unknown or missing
+// icon simply draws nothing rather than failing the render.
+const iconNode = (name, opts) => (name && window.Icons ? Icons.el(name, opts) : null);
 
 const CAM = Object.assign({}, M.camera || {}, { duration: D });
 const SHAKE = M.shake || { amp: 2, decay: 0.3, freq: 14 };
@@ -195,6 +202,17 @@ function build() {
   const tx = lay.text.x * s, ty = lay.text.y * s, tw = lay.text.w * s;
   const eyebrowEl = el(layerFg, "div", { position: "absolute", top: "0px", width: "100%", opacity: "0",
     fontSize: `${12 * s}px`, letterSpacing: `${3 * s}px`, color: C.dim, textAlign: lay.text.align }, S.eyebrow || "");
+  const eyebrowIcon = iconNode(S.eyebrowIcon, { size: 15 * s, color: C.accent, width: 2 });
+  if (eyebrowIcon) {
+    // The eyebrow is anchored to the frame rather than the text column, so under the camera's
+    // push a glyph hung on the wrong side can sit outside the safe area. Put it on the side the
+    // text itself is aligned to.
+    const align = lay.text.align;
+    Object.assign(eyebrowEl.style, { display: "flex", alignItems: "center", gap: `${8 * s}px`,
+      justifyContent: align === "center" ? "center" : (align === "right" ? "flex-end" : "flex-start") });
+    if (align === "right") eyebrowEl.appendChild(eyebrowIcon);
+    else eyebrowEl.insertBefore(eyebrowIcon, eyebrowEl.firstChild);
+  }
 
   const titleBox = el(layerFg, "div", { position: "absolute", top: `${(ty + 24 * s)}px`, left: `${tx}px`,
     width: `${tw}px`, fontSize: `${(S.titleSize || 56) * TS * s}px`, fontWeight: "500",
@@ -229,7 +247,15 @@ function build() {
     const wrap = el(layerFg, "div", { position: "absolute", top: `${(rowsTop + i * 54) * s}px`, opacity: "0",
       left: lay.text.align === "center" ? "50%" : "0px", textAlign: lay.text.align });
     if (lay.text.align === "center") wrap.style.marginLeft = `-${90 * s}px`;
-    el(wrap, "div", { fontSize: `${11 * s}px`, letterSpacing: `${2 * s}px`, color: C.dim, textAlign: lay.text.align }, r.label || "");
+    const lab = el(wrap, "div", { fontSize: `${11 * s}px`, letterSpacing: `${2 * s}px`, color: C.dim, textAlign: lay.text.align }, r.label || "");
+    const labIcon = iconNode(r.icon, { size: 13 * s, color: r.color || C.accent, width: 2 });
+    if (labIcon) {
+      const align = lay.text.align;   // same side rule as the eyebrow, for the same reason
+      Object.assign(lab.style, { display: "flex", alignItems: "center", gap: `${7 * s}px`,
+        justifyContent: align === "center" ? "center" : (align === "right" ? "flex-end" : "flex-start") });
+      if (align === "right") lab.appendChild(labIcon);
+      else lab.insertBefore(labIcon, lab.firstChild);
+    }
     const val = el(wrap, "div", { fontSize: `${18 * s}px`, color: C.text, marginTop: `${5 * s}px`, whiteSpace: "nowrap" }, r.value || "");
     const track = el(wrap, "div", { marginTop: `${8 * s}px`, width: `${180 * s}px`, height: `${4 * s}px`,
       background: rgba(C.border, 0.5), borderRadius: `${3 * s}px`, overflow: "hidden" });

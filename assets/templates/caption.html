@@ -20,6 +20,8 @@
 </div>
 <script src="../runtime/anim.js"></script>
 <script src="../runtime/kit.js"></script>
+<script src="../icons/lucide.js"></script>
+<script src="../runtime/icons.js"></script>
 <script>
 // caption: the explainer workhorse, built on the same beat-sheet runtime as kinetic. The panel
 // keeps travelling, the headline swaps mid-shot, bullets transform, and the narration band
@@ -36,6 +38,11 @@ const C = Object.assign({
   accent: "#e0455f", accent2: "#38bdf8", accent3: "#a78bfa",
   series: ["#e0455f", "#38bdf8", "#a78bfa", "#4ade80"]
 }, V.colors || {});
+
+// Optional icons: `chapter.icon` (or `eyebrowIcon`) for the chip, and per-row `icon` to replace
+// the coloured bullet with a real glyph. Nothing changes unless a field asks for it, and an
+// unknown icon draws nothing instead of failing the render.
+const iconNode = (name, opts) => (name && window.Icons ? Icons.el(name, opts) : null);
 const SHAKE = M.shake || { amp: 1.6, decay: 0.3, freq: 13 };
 const DEPTH = M.depth || { bg: 0.3, mid: 0.75, fg: 1.15 };
 const PARTICLES = M.particles || { count: 20, speed: 20, size: 2, opacity: 0.24, vertical: 8, mode: "dust" };
@@ -154,6 +161,12 @@ function build() {
     borderRadius: `${999 * s}px`, fontSize: `${13 * s}px`, letterSpacing: `${2 * s}px`, color: C.accent },
     S.chapter ? String(S.chapter.index).padStart(2, "0") + " / " + String(S.chapter.total).padStart(2, "0") +
       (S.chapter.label ? "   " + S.chapter.label : "") : (S.eyebrow || ""));
+  const chipIcon = iconNode((S.chapter && S.chapter.icon) || S.eyebrowIcon,
+    { size: 15 * s, color: C.accent, width: 2 });
+  if (chipIcon) {
+    Object.assign(chip.style, { display: "inline-flex", alignItems: "center", gap: `${8 * s}px` });
+    chip.insertBefore(chipIcon, chip.firstChild);
+  }
 
   const titleBox = el(layerFg, "div", { position: "absolute", left: colX, top: `${150 * s}px`,
     width: `${colW}px`, fontSize: `${(S.titleSize || 44) * TS * s}px`, lineHeight: "1.22",
@@ -182,8 +195,14 @@ function build() {
       opacity: "0", display: "flex", alignItems: "baseline", gap: `${12 * s}px` });
     const dot = el(row, "div", { width: `${8 * s}px`, height: `${8 * s}px`, background: r.color || C.series[i % 4],
       borderRadius: `${2 * s}px`, flex: "0 0 auto" });
+    const mark = iconNode(r.icon, { size: 18 * s, color: r.color || C.series[i % 4], width: 2 });
+    if (mark) {                      // a named icon takes over the bullet's job
+      mark.style.flex = "0 0 auto";
+      row.replaceChild(mark, dot);
+    }
     const txt = el(row, "div", { fontSize: `${17 * s}px`, color: C.text }, r.value || r.label || "");
-    return { actor: scene.actor(row, { opacity: 0, x: -30 }), dot: scene.actor(dot, { scale: 0.4, opacity: 0 }),
+    return { actor: scene.actor(row, { opacity: 0, x: -30 }),
+             dot: scene.actor(mark || dot, { scale: 0.4, opacity: 0 }),
              node: row, text: txt, value: r.value || r.label || "", i };
   });
 

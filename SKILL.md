@@ -45,6 +45,10 @@ render time is spent.
 | `probe <files...>` | decide how to use an asset |
 | `sprite <image> [--width 64 --height 96 --colors 12]` | image to pixel-art sprite plus shadow |
 | `beats <audio> [--cuts 60]` | beat times and montage cut points |
+| `icons sets` | icon sets that can be vendored, with licences |
+| `icons search <query>` | find icons by name or tag (build-time; downloads once) |
+| `icons add <name>... [--preset core]` | vendor icons into a template-loadable catalog |
+| `icons list` | what the catalog holds now (offline) |
 | `init <dir> [--template starter\|short\|longform]` | scaffold a project |
 | `preview <project> [--segment id] [--at 2.0]` | one still frame, fast design loop |
 | `render <project> [--jobs N] [--force]` | render segments only (cached) |
@@ -100,6 +104,13 @@ footage enters a montage.
 `callout{c1,c2}`, `footer`, `caption`, `chapter{index,total,label}`, `colors{...}`, `sprite{...}`,
 and `still: true`.
 
+`kinetic` and `caption` also take optional icons (see [Icons](#icons)); nothing is drawn unless
+you ask, so adding these fields is the only thing that changes a frame:
+
+- `eyebrowIcon` - glyph before (or after, on right-aligned layouts) the eyebrow, kinetic
+- `rows[].icon` - kinetic: glyph on the row's label line; caption: replaces the coloured bullet
+- `chapter.icon` - glyph inside the caption chapter chip
+
 Assets: `subject` (any image; `pixel` auto-converts it to a sprite), `sprite` plus `spriteShadow`
 (pre-made), `background`.
 
@@ -119,6 +130,38 @@ path as `template` when none of the three fit.
 - **Audio levels:** a music bed should measure a mean of roughly -45 to -10 dB in `verify`; voice
   around -18 to -12 dB. `amix` normalises by track count, so each added track costs about 6 dB.
 - **Always verify.** If a check fails, fix the spec, not the check.
+
+## Icons
+
+A template that needs a recognisable symbol - a file, a film frame, a check, a gauge - should not
+hand-draw it. `assets/icons/<set>.js` is a vendored catalog and `assets/runtime/icons.js` renders
+it, for both template styles:
+
+```html
+<script src="../icons/lucide.js"></script>
+<script src="../runtime/icons.js"></script>
+```
+
+```js
+// canvas templates
+Icons.draw(ctx, "gauge", 480, 320, 96, { color: INK, width: 2, mode: "hand" });
+// DOM templates
+stage.appendChild(Icons.el("film", { size: 64, color: C.accent, width: 1.5 }));
+el.innerHTML = Icons.svg("sparkles", { size: 32 });   // or markup, when that is simpler
+Icons.search("video");                                // names + upstream tags
+```
+
+`mode` is `"stroke"` (clean line art, the icon's native look), `"fill"`, or `"hand"` - a
+three-pass dry-pencil build-up, so line art sits inside a hand-drawn scene instead of on top
+of it. The catalog is a plain script: a render never touches the network, never hits file://
+CORS, and produces the same frame for the same `t`, like every other scene value.
+
+Ships with a 116-icon Lucide core (ISC, no attribution needed in the output) at 31 KB. Extend it
+with `icons search` + `icons add`, which keep the icons already in the file and record set,
+version and licence in the header. `--set tabler` is the MIT alternative; `--catalog` writes a
+project-local catalog instead (load that one with your own `<script src>`).
+
+
 
 ## Routing
 
