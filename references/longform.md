@@ -1,131 +1,107 @@
-# Long-form: 5 minutes and beyond
+# Long-form: 5 minutes and beyond, in one take
 
-Everything here is about filling runtime without wasting render time or losing the thread.
+Everything here is about filling runtime without wasting render time or losing the thread. The old
+version of this file budgeted 20-40 *segments*; there are no segments any more. There is one shot,
+and it runs from t=0 to the end.
 
-## 1. Budget the structure before anything else
+## 1. The budget is frames, and holds are the only lever
 
-A 5-minute video is 300 seconds. Do not think in one timeline; think in segments.
+Cost = frames = `duration × fps ÷ jobs`. A 5-minute take at 1920×1080/30fps is 9000 frames, about
+58 minutes of wall clock on one job or ~20 minutes at `jobs: 3`. There is no "make this bit a still
+segment" escape any more, so the take declares it instead:
 
-| section | typical share | segment length | count |
+```jsonc
+"duration": 300,
+"scene": "scenes/take.html",
+"hold": [[12.5, 26.0], [58.0, 96.0], [140.0, 205.0]]
+```
+
+Inside a hold the renderer reuses the previous frame: those seconds still exist in the finished
+file, but they cost one frame each instead of 30 per second. Rule of thumb for a 5-minute take:
+
+- keep **animated seconds under 90** and hold the rest
+- check the split with `vs.py plan` - it prints `frames_to_render`, per-beat `hold`, and an estimate
+- if the take is still too expensive: 1280×720 (about half), 24fps (a fifth less), or the pixel look
+  (320×180, roughly 15×)
+
+## 2. Write the narration first
+
+Draft the script, then decide where the picture has to change. Chinese narration runs roughly 4-5
+characters per second, English about 2.5 words per second, so a 40-character paragraph is about 9
+seconds. The script decides the length of the take; the take decides the render.
+
+`vs.py narrate <project> --script script.txt` synthesizes the voice and sets the duration from what
+was actually spoken. For a single take, narrate it as one continuous line -
+`{"segment": "take", "text": "..."}` - and let the scene place its internal cues against those
+timings.
+
+## 3. Structure the inside of the take
+
+A five-minute single take still needs structure; it just does not get it from cuts. Aim for **8-12
+internal chapters**, each one a real recomposition of the frame (the four devices are in
+[formats.md](formats.md)), with the chapter label and the global progress bar
+(`look.progress_bar`) telling the viewer where they are.
+
+| section | typical share | chapters | how the frame changes |
 | --- | --- | --- | --- |
-| cold open / hook | 10-20 s | 5-10 s | 2-3 |
-| context | 30-45 s | 10-15 s | 3-4 |
-| core argument | 2-2.5 min | 15-30 s | 6-10 |
-| demonstration | 1-1.5 min | 20-45 s | 3-4 |
-| recap + CTA | 20-30 s | 8-12 s | 2 |
+| cold open | 10-20 s | 1-2 | full-frame statement, then the first transformation |
+| context | 30-45 s | 2-3 | move the camera; replace one object with another |
+| core argument | 2-2.5 min | 4-6 | the meat: one recomposition per idea, holds between |
+| demonstration | 1-1.5 min | 2-3 | let something actually happen on screen |
+| recap + CTA | 20-30 s | 1-2 | return to the opening frame, changed |
 
-Aim for 20-40 segments. Fewer means every segment has to carry too much and becomes a slideshow;
-more means the render budget and the chapter numbering both get noisy.
+Rules that survive the change from segments to one take:
 
-## 2. Write the narration first, then the visuals
-
-Draft the spoken script, split it at natural paragraph breaks, and make each paragraph one segment.
-Duration follows the words: Chinese narration runs roughly 4-5 characters per second, English about
-2.5 words per second. A 40-character Chinese paragraph is therefore about 9 seconds.
-
-This ordering matters because the script decides the segment count, and the segment count decides
-the render time. Never design 40 shots and then discover the script is 3 minutes short.
-
-## 3. Use held shots for anything static
-
-`"still": true` renders one frame and holds it for the segment duration. This is the single biggest
-lever on a long video.
-
-```jsonc
-{ "id": "ch03a", "template": "caption", "duration": 24.0,
-  "data": { "still": true, "title": "第三步：交付", "caption": "把上面的结论写成一句话。" },
-  "assets": { "subject": "assets/fig03.png" } }
-```
-
-Measured: a 60-second 1080p held segment costs ~14 s end-to-end (one rendered frame plus encode),
-versus ~23 minutes if rendered frame by frame. A 5-minute video built mostly from held shots plus a
-few animated segments finishes in a couple of minutes.
-
-Reserve full animation for the hook, section transitions, and the diagrams that actually move. If a
-section only holds a slide and a caption, hold it.
-
-## 4. Budget the render
-
-At 1080p with `jobs: 3`, animated segments cost roughly 0.13 s per frame of wall time, i.e. about
-4 seconds of render per second of finished video. A 5-minute video with 60 seconds of animated
-segments and 240 seconds of held shots lands around 4-6 minutes of wall time. Check
-`references/pipeline.md` for the raw per-resolution numbers.
-
-Rules of thumb:
-
-- Animated seconds are the budget. Keep a running total; 60-90 s of animation in a 5-minute video is
-  plenty.
-- `render.crf: 12` for intermediates is visually lossless and keeps `build/` small; the final
-  `video.crf: 20` is fine for talk-heavy content.
-- Intermediates live in `build/<name>/segments/`. Delete the folder to reclaim space at the cost of
+- **Animated seconds are the budget.** Budget them like money.
+- **A recomposition is not an entrance.** The old failure was "everything fades up and holds";
+  a chapter has to *change the arrangement* of the frame, not just bring in more type.
+- **Escape the entry** at some point: the viewer needs at least one moment where the camera moves
+  into the subject rather than the subject arriving.
+- `render.crf: 12` for intermediates is visually lossless; the final `video.crf: 20` is fine.
+- Intermediates live in `build/<name>/segments/`. Delete that folder to reclaim space at the cost of
   re-rendering.
-- Parallel `jobs` should not exceed physical cores; screenshot capture is CPU-bound.
 
-## 5. Audio: voice over music
+## 4. Audio
 
 ```jsonc
-"audio": { "tracks": [
-  { "src": "assets/voice.wav", "at": 1.0, "gain_db": -3 },
-  { "src": "assets/music.mp3", "gain_db": -26, "fade_in": 2, "fade_out": 3, "loop": true }
-] }
+"audio": {
+  "tracks": [
+    { "src": "assets/voice.wav", "at": 1.0, "gain_db": -3, "role": "voice" },
+    { "src": "assets/music.mp3", "gain_db": -26, "fade_in": 2, "fade_out": 3, "loop": true, "duck": true }
+  ]
+}
 ```
 
-Targets, as measured by `verify`:
+Targets, as measured by `verify`: voice around -18 to -12 dB mean; music bed around -38 to -28 dB,
+roughly 15-20 dB under the voice. `gain_db` is relative to the file as delivered - probe it first.
+`amix` normalises by track count, so re-check levels after every track you add.
 
-- voice around -18 to -12 dB mean
-- music bed around -38 to -28 dB mean, i.e. roughly 15-20 dB under the voice
-- `gain_db` is relative to the file as delivered. Probe it first: a track that already measures
-  -31 dB needs only -6, not -26.
+## 5. Subtitles
 
-`amix` normalises by track count, so adding a third track quietly lowers the other two. Re-check
-levels after every track you add.
-
-If the mix still fights, lower the music with `gain_db` rather than raising the voice, and prefer a
-music bed with no vocals under narration.
-
-## 6. Subtitles
-
-Write an SRT next to the audio and hand it to the assembler. It is burned in after the look, so it
-survives grading and the pixel pass.
+Burn them in; they survive grading and the pixel pass. Keep each cue under about 20 Chinese
+characters or two lines, and keep `MarginV` clear of the progress bar:
 
 ```jsonc
 "subtitles": { "src": "assets/subs.srt",
-  "style": "FontName=Microsoft YaHei,FontSize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H80000000,BorderStyle=1,Outline=2,Shadow=0,MarginV=36" }
+  "style": "FontName=Microsoft YaHei,FontSize=30,PrimaryColour=&H00FFFFFF,OutlineColour=&H80000000,BorderStyle=1,Outline=2,Shadow=0,MarginV=40" }
 ```
 
-For 1080p bump `FontSize` to 30-34. `MarginV` keeps the text clear of the bottom edge and of any
-progress bar. Keep each cue under about 20 Chinese characters or two lines; long cues get clipped
-and read badly.
+Verify subtitles actually rendered: extract a frame inside a cue window, count bright pixels in the
+bottom band, and compare with a frame between cues.
 
-Verify that subtitles actually rendered: extract a frame inside a cue window and count bright pixels
-in the bottom band, then compare with a frame in a gap between cues.
+## 6. Delivery checklist
 
-## 7. Chapters and the progress bar
+1. `verify` passes - duration, content, fades, motion, audio level.
+2. **No dead stretch**: the `motion` check reports frozen intervals against a budget; a long take
+   with no holds declared and nothing moving is the failure this catches.
+3. Spot-check a frame per internal chapter, not just the first frame.
+4. Chapter numbering runs 1..N with no gaps.
+5. Watch the joins *inside* the take: a recomposition that lands while the previous content is still
+   fading reads as a mistake. One window, one event.
+6. Keep `build/<name>/segments/` if you may re-cut; that clip is expensive to regenerate.
 
-Give every segment `chapter: { index, total, label }`; `caption` and `pixel` render it as a chip, so
-the viewer always knows where they are. Add a global bar instead of a per-segment one:
+## 7. Re-editing
 
-```jsonc
-"look": { "progress_bar": { "height": 4, "color": "#e0455f" } }
-```
-
-## 8. Delivery checklist
-
-Before handing over a long video, confirm:
-
-1. `verify` passes — duration within 2% of planned, no black sections, fades present, audio level in
-   range.
-2. Spot-check one frame per chapter with `preview` or a frame extraction, not just the first frame.
-3. Chapter numbering runs 1..N with no gaps and matches the count in the last segment.
-4. Watch the joins: a cut between two segments with a similar background reads as a mistake — give
-   the boundary a 0.4-0.6 s crossfade or a hard contrast change.
-5. File size and `+faststart` — the encoder already sets faststart, and a 5-minute 1080p file at
-   crf 20 lands around 50-150 MB depending on motion.
-6. Keep the build folder if you may need to re-cut; only `build/<name>/segments/*.mp4` is expensive
-   to regenerate.
-
-## 9. Re-editing
-
-Because segments are cached independently, changing one chapter costs one segment plus assembly.
-Re-cut the order by editing `timeline` only. If a segment's `data` changes, only that segment
-re-renders — this is what makes iteration on a long video practical.
+The take is one cached clip: change the scene and the whole take re-renders (change the **hold
+windows** and only the cost changes). During development, render at 1280×720 with `fps: 12` to get
+the timing right, then set the delivery format and render once.

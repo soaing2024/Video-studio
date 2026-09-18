@@ -43,6 +43,10 @@ edited in place within the same second).
 
 ## 4. Assembly
 
+One ffmpeg invocation per project. A single-take project feeds the fold a single clip, so
+concat/xfade do nothing and the filter graph is just the look chain; the fold exists for the
+montage path (many `source` clips) and for multi-shot projects.
+
 One ffmpeg invocation per project. The filter graph is written to `build/<name>/filter.txt` and
 passed via `-/filter_complex` (falling back to `-filter_complex_script` on older builds).
 
@@ -146,7 +150,7 @@ segments for re-runs.
 
 ## 10. Extending it
 
-- **New template:** copy one from `assets/templates/`, keep the `seek(t)` contract and the
+- **New scene:** write one (`vs.py init --duration N` scaffolds one), keep the `seek(t)` contract and the
   `window.SCENE` input, pass its path as `"template"` in a segment.
 - **New look:** add a filter to the tail chain in `assemble.py`. Anything ffmpeg can express is
   available; keep it deterministic and duration-aware.

@@ -18,8 +18,8 @@ python <skill>\scripts\vs.py doctor --install-ffmpeg
 # 1. 看素材：尺寸、透明通道、主色、时长、音量
 python vs.py probe 我的图.png 我的音乐.mp3
 
-# 2. 新建项目（starter 模板不需要任何素材，直接能跑）
-python vs.py init 我的项目 --template starter
+  # 2. 新建项目（生成配置 + 一个空白场景，写它才是创作本身）
+  python vs.py init 我的项目 --duration 20
 
 # 3. 试一帧：改完配置先看单帧，几秒钟就有结果
 python vs.py preview 我的项目\project.json --segment title --at 2.5
@@ -31,38 +31,34 @@ python vs.py run 我的项目\project.json --jobs 3
 `run` 会打印一份 JSON 验收报告。**任何一项 `ok: false` 就说明有问题**，`detail` 会告诉你该调哪个参数。
 退出码非 0 表示验收没通过。
 
-## 三种画面模板
+## 画面：没有模板，只有场景
 
-| 模板 | 适合 | 关键字段 |
-| --- | --- | --- |
-| `kinetic` | 开场、章节页、片尾；6-10 秒最好 | `eyebrow` `title` `subtitle` `rows` `callout` |
-| `caption` | 解说、口播、长视频正文 | `chapter` `title` `rows` `caption` |
-| `pixel` | 像素风；自动把图片转成精灵 | `title` `cn` `sprite` `rows` |
-
-三个模板都认同一套字段，缺什么就跳过什么。要加自己的样式，就复制一份模板 HTML，
-保持 `window.seek(t)` 这个约定即可。
-
-## 长视频的关键：静态段落
-
-五分钟视频 = 20-40 个段落。绝大多数段落其实是"一张图 + 一句话"，那就别逐帧渲染：
+技能不分段，也不提供画面模板。**一个项目 = 一个场景文件 + 一个总时长**，整片一镜到底：
 
 ```jsonc
-{ "id": "ch03", "template": "caption", "duration": 24.0,
-  "data": { "still": true, "title": "第三步：交付", "caption": "把结论写成一句话。" },
-  "assets": { "subject": "assets/fig03.png" } }
+"duration": 24.0,
+"scene": "scenes/take.html",
+"hold": [[6.0, 11.0]]      // 这几秒画面不变，复用一帧
 ```
 
-`"still": true` 只渲染一帧再用 ffmpeg 保持住，**成本与时长无关**。
-实测：1080p 的 60 秒静态段落跑完只要 14 秒；如果逐帧渲染要 23 分钟。
+写一个 HTML：`window.seek(t)` 是 t 的纯函数，数据从 `window.SCENE` 读。`Scene` / `Anim` / `Kit`
+由渲染器注入（**不要写 `<script src>`**）。换场不靠切，只有四种：移出/移入、变换、横扫、明暗呼吸。
+规则与闸门见 [choreography.md](choreography.md)。
 
-渲染速度参考（1080p、30fps）：
+## 长视频的关键：hold
 
-- 逐帧动画：约 0.38 秒/帧，单人跑五分钟视频约 58 分钟，`jobs: 3` 约 20 分钟
-- 静态段落：几秒
-- 像素风（320×180 渲染再 4 倍放大）：约 0.025 秒/帧，五分钟视频约 4 分钟
+五分钟是一个镜头，不是 20-40 个段落。唯一省钱的杠杆是声明静止：
 
-所以长视频的策略是：**只让该动的地方动**，正文用静态段落，动效留给开场、章节切换和真正的演示。
+```jsonc
+"duration": 300,
+"hold": [[12.5, 26.0], [58.0, 96.0]]
+```
 
+hold 里的帧渲染器直接复用，**成本与时长无关**。经验值：5 分钟片把"真在动"的秒数压到 90 秒以内，
+其余全部 hold；用 `vs.py plan` 看 `frames_to_render`。
+
+渲染速度参考（1080p、30fps）：逐帧约 0.38 秒/帧，`jobs: 3` 时五分钟片约 20 分钟；
+像素风（320×180 渲染再 4 倍放大）约 0.025 秒/帧；hold 区间几乎不花时间。
 ## 常用搭配
 
 **换风格**：`look.accent` 改主色；像素风加 `"pixelate": {"scale": 4, "colors": 16}`；
@@ -94,7 +90,7 @@ python vs.py run 我的项目\project.json --jobs 3
 python vs.py beats assets/track.mp3 --cuts 45 --min-len 0.8
 ```
 
-返回的 `cuts` 就是一串时间点。真实素材和渲染段落可以混着排：
+返回的 `cuts` 就是一串时间点。**这是混剪专用的分段写法**（其余项目都是一镜到底）：
 
 ```jsonc
 "timeline": [
@@ -112,7 +108,7 @@ python vs.py beats assets/track.mp3 --cuts 45 --min-len 0.8
 
 ## 常见坑
 
-- 改完 `project.json` 直接重跑即可，**没改动的段落会命中缓存**，只有改过的重渲。
+- 改完场景重跑即可；整片是一个缓存单元。
 - 想强制重渲加 `--force`。
 - 中间片段在 `build/<项目名>/segments/`，删掉可以省空间，代价是下次要重渲。
 - 技能目录里的 `vendor/` 是 ffmpeg，别删；`build/` 才是可以清理的。

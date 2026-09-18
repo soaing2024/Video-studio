@@ -1,99 +1,92 @@
 # Format recipes
 
-Pick the row that matches the job, then adjust. Every recipe is a spec fragment, not a new tool.
+Every recipe here is a fragment for a **single take**: one scene, one duration, no cuts. What used
+to be a cut is now a transformation inside the shot (see [choreography.md](choreography.md) §0).
 
-## High-energy montage (高燃混剪)
+## 一镜到底的四个通用手法
 
-Goal: cuts land on the music, energy never drops, the file stays short (15-60 s).
+换场不靠剪辑，只有四种手段：
 
-```bash
-python vs.py beats assets/track.mp3 --cuts 45 --min-len 0.8
-```
+1. **移出 / 移入**：镜头移到让当前主体离开画面边缘，新主体从另一侧进来。
+2. **变换**：画面里的一件东西变成下一件（数字滚成另一个数字、形状展开成结构）。
+3. **横扫**：用画面内部的一个元素（色带、光带、手写字）横穿而过来替换内容。
+4. **明暗呼吸**：一次快速压暗再亮起，等于一个软切；用多了廉价，用一次很有效。
 
-The result is a list of timestamps. Build the timeline from them, either by cutting real footage with
-`source` entries or by cutting between rendered segments:
+其它三条纪律：
 
-```jsonc
-"timeline": [
-  { "source": "assets/clip01.mp4", "trim": [4.2, 6.9], "transition": { "type": "cut" } },
-  { "source": "assets/clip02.mp4", "trim": [11.0, 13.4] },
-  { "segment": "title-a", "transition": { "type": "fadeblack", "duration": 0.2 } }
-]
-```
+- **要有面积在动。** 运动指标是全帧平均，细线在 1080p 上几乎不可见（实测同一条 2px 的线：
+  320×180 是 2.3/255，1920×1080 只有 0.72/255）。
+- **一个窗口只放一件事。** 淡入会吃掉同窗口里的一切。
+- **静止要声明**：`"hold": [[6.0, 11.0]]`，渲染器复用一帧；没声明的静止会被算成死拍。
 
-- Shot length 0.8-1.5 s when the beat is fast, 2-3 s in the chorus.
-- `transition: "cut"` on the beat is stronger than any dissolve; save `fade`/`fadeblack` for the
-  section changes only.
-- Keep every segment's own animation short: a montage segment is a background plus one moving
-  element, not a full graphics build.
-- Grade for punch: `"grade": { "saturation": 1.15, "contrast": 1.08 }`.
-- Land the final cut exactly on a beat and let the music resolve.
-
-## Short-form vertical (短视频)
+## Short-form vertical（短视频）
 
 ```jsonc
-"video": { "width": 1080, "height": 1920, "fps": 30 }
+"video": { "width": 1080, "height": 1920, "fps": 30 },
+"duration": 30,
+"scene": "scenes/take.html"
 ```
 
-- The subject goes in the middle 60% of the height; the top 12% and bottom 20% are covered by app UI
-  and captions on most platforms.
-- Hook inside 3 seconds: the first segment should be the payoff, not a logo.
-- One line of on-screen text at a time. Text at 60-80 px for 1080-wide output.
-- 6-12 segments, 3-6 s each, total 20-45 s.
-- Captions burned in (`subtitles`) outperform platform-generated ones for retention.
+- 主体放在中间 60% 的高度里；顶部 12% 与底部 20% 会被平台界面和字幕压住。
+- **钩子在开场 3 秒内**——不是"第一段要是钩子"，而是第 3 秒时必须已经给出结论。
+- 一次只出现一行字，1080 宽输出用 60-80px。
+- 20-45 秒一个镜头，从 t=0 到结束不停，中间靠上面四种手法换场。
+- 字幕烧进画面（`subtitles`）比平台自动字幕更能留住人。
 
-## Long-form explainer (5 分钟以上)
+## Long-form explainer（5 分钟以上）
 
-See [longform.md](longform.md). The short version: narration script first → one paragraph per
-segment → `"still": true` for slides → animated segments only for the hook, section breaks and real
-diagrams → chapter chips → global progress bar.
+见 [longform.md](longform.md)。一句话版本：**一个镜头，内部切 8-12 个章节**，每章一次明确的
+画面重构；大部分时间用 `hold` 声明静止，只让真正要动的地方动。
 
-## Explainer with talking-head or voice-over (解说视频)
+## Explainer with voice-over（解说视频）
 
-Use the `caption` template for every beat. It renders a chapter chip, headline, bullet list, media
-panel and a lower-third narration band, so the viewer can read or listen.
+同一个镜头，画面随口播推进：
 
-```jsonc
-{ "id": "ch02", "template": "caption", "duration": 12.0,
-  "assets": { "subject": "assets/fig02.png" },
-  "data": {
-    "chapter": { "index": 2, "total": 6, "label": "背景" },
-    "title": "问题从哪里来",
-    "rows": [ { "value": "2023：需求增长 3.2 倍", "color": "#e0455f" } ],
-    "caption": "用年份和数字代替形容词。",
-    "footer": "chapter 02" } }
-```
+- 一屏最多三条信息；超过三条说明这一屏该"换"了——用变换或横扫，不要切。
+- 信息块用**替换**而不是堆叠：新的进来时旧的离开同一个位置。
+- 旁白念长了要延长画面时，注意**成本线性增长**（帧数 = 时长 × 帧率）。如果那几秒画面本来就不
+  变，把它写进 `hold`，成本才是零。
+- 章节标签、进度条这类"脚手架"必须跟着内容一起退场，不要留在空画面上。
 
-- Three bullets maximum per segment; more means the segment should be split.
-- Put the number, not the adjective, in the bullet.
-- If the voice-over runs long, extend the segment duration rather than trimming the audio — the
-  visuals are held, so lengthening costs nothing.
+## Product / data motion graphics（数据与产品镜头）
 
-## Product / data motion graphics (kinetic)
+- 别用"条形图依次生长"这个默认答案；让数字自己成为画面（大数字、刻度、对比）。
+- 数字旁边要有刻度或参照物，否则观众读不出量级。
+- 先交代单位与口径，再让数字动。
 
-`kinetic` carries an eyebrow, headline, subtitle, up to four label/value/bar rows, a subject image
-with an entrance and a silhouette-masked scan, a selection frame and a footer.
-
-- Best at 6-10 s. It has enough moving parts that longer segments feel slow.
-- The `weight` field on each row drives the bar fill; keep values as data, not decoration.
-- Use it for the hook, section dividers and the CTA of any format.
-
-## Pixel style
+## Pixel style（像素风）
 
 ```jsonc
 "look": { "pixelate": { "scale": 4, "colors": 16, "dither": "none" } }
 ```
 
-- Renders at `width/scale`; 1280×720 with `scale: 4` renders at 320×180, which is also ~15× faster.
-- `pixel` template converts `assets.subject` into a sprite automatically (`sprite.width/height/colors`).
-- Prefer `"sprite": { "width": 64, "height": 96, "colors": 12 }` for a full-body cut-out, smaller for
-  props.
-- Presets live in `assets/palettes.json`: `pixel16`, `gameboy` (with `colors: 4`), `mono` (with
-  `colors: 2, dither: "bayer"`).
-- Never combine a pixelated look with smooth sub-pixel motion; round every transform.
+- 渲染分辨率降到 `宽/scale`：1280×720 配 `scale: 4` 就是 320×180，**同时快约 15 倍**。
+- 精灵先用命令行做出来，再当普通素材传给场景：`vs.py sprite assets/subject.png`。
+- 预设配色见 `assets/palettes.json`：`pixel16`、`gameboy`（配 `colors: 4`）、
+  `mono`（配 `colors: 2, dither: "bayer"`）。
+- 动作必须落在整数像素上，否则放大后会抖动。
+- 量化时钟（每秒 11-15 个新状态）比调缓动更能做出手绘 / 定格的手感。
 
-## Custom template
+## 混剪（唯一允许分段的形态）
 
-Copy `assets/templates/kinetic.html`, keep `window.seek(t)` pure, read `window.SCENE`, and set
-`"template": "path/to/my.html"` in the segment. The renderer injects the data before page scripts run
-and waits for `window.__sceneReady !== false`.
+混剪按定义就是多镜头，所以它是**例外**：素材是现成片段，镜头长度由音乐决定。
+
+```bash
+python vs.py montage 素材文件夹 --music 音乐.mp3 --out 混剪.json --duration 60 --style energy
+```
+
+生成的是普通工程（`timeline` 里是 `source` 条目 + 一张片头卡 / 片尾卡场景），可以接着手改。
+切点落在节拍上：`vs.py beats 音乐.mp3 --cuts 45 --min-len 0.8`。
+
+- 快节奏段镜头 0.8-1.5 秒，副歌 2-3 秒。
+- 节拍上用硬切比任何溶解都强；`fade` / `fadeblack` 只留给段落转折。
+- 每个渲染出来的卡片镜头本身也要简短：背景 + 一个在动的元素，不要在建画面。
+- 冲击感靠调色：`"grade": { "saturation": 1.15, "contrast": 1.08 }`。
+- 最后一刀落在拍子上，让音乐收完。
+
+## 写场景（不是"选模板"）
+
+没有模板可选。写一个 HTML：`window.seek(t)` 是 t 的纯函数，数据从 `window.SCENE` 读。
+`Scene` / `Anim` / `Kit` 由渲染器注入，**不要写 `<script src>`**。工程里写
+`"scene": "scenes/take.html"`（路径按工程目录解析）。渲染器会等 `window.__sceneReady !== false`。
+怎么编排见 [choreography.md](choreography.md)。

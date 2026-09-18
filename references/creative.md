@@ -16,7 +16,7 @@ It writes `brief.json` (machine) and `brief.md` (readable), containing:
 
 - **goal** — platform, aspect, fps, audience, tone, target duration
 - **premise / promise** — what the video claims and what the viewer gets
-- **structure** — one beat per narration line, each with an act (hook / context / body / proof /
+- **structure** — one internal cue per narration line, each with an act (hook / context / body / proof /
   turn / close), the intent, the spoken line, the *on-screen* phrase (a different thing), the
   template, the visual device, and duration
 - **visual_plan** — the resolved layout, motion family and accent for every beat, so the variety is
@@ -95,7 +95,7 @@ python vs.py run project.json --seed 777
 `adjacent_layout_repeats` must be 0. Past signatures are recorded in `~/.video-studio/history.json`,
 so `closest_past_project` warns when a new piece would look like an old one.
 
-Template-level override, when a beat needs a specific composition:
+Template-level override, when a cue needs a specific composition:
 
 ```jsonc
 "data": { "visual": { "layout": "fullbleed", "entrance": "wipe", "density": "minimal",

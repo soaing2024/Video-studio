@@ -38,8 +38,8 @@ python ~/.codex/skills/video-studio/scripts/vs.py selftest
 ## 五分钟上手
 
 ```powershell
-# 1. 建项目（starter 模板不需要任何素材，直接能跑）
-python vs.py init 我的项目 --template starter
+# 1. 建项目（生成一份配置 + 一个空白场景文件）
+python vs.py init 我的项目 --duration 20
 
 # 2. 试一帧（改完配置先看单帧，几秒出结果）
 python vs.py preview 我的项目\project.json --segment title --at 2.5
@@ -69,7 +69,7 @@ python vs.py run 我的项目\project.json --jobs 3
 | `voices` | 列出本机可用语音（旁白用） |
 | `narrate <项目> --script 台词.txt` | 合成旁白、按语音长度定时、生成字幕 |
 | `montage <素材目录> --music 音乐.mp3 --out 项目.json` | 从素材文件夹自动生成混剪工程 |
-| `init <目录> [--template starter\|short\|longform]` | 新建工程 |
+| `init <目录> [--duration N]` | 新建工程（含一个待写的场景） |
 | `plan <项目>` | 空跑：问题清单、缓存命中、预计渲染时长 |
 | `preview <项目> [--segment id] [--at 2.0]` | 渲染单帧，设计迭代用 |
 | `render <项目> [--jobs N] [--force]` | 只渲染（命中缓存则跳过） |
@@ -106,7 +106,7 @@ python vs.py style --seed 2024 --swatch style.png   # 先看配色和方案
 python vs.py run project.json --seed 777            # 不改文件，直接换一套
 ```
 
-`plan` 会给出多样性体检：用了多少种构图/动态/转场、相邻重复数（必须为 0）、以及与历史项目的最高相似度（签名记在 `~/.video-studio/history.json`）。
+`plan` 会给出多样性体检：用了多少种构图与动态、相邻重复数（必须为 0）、以及与历史项目的最高相似度（签名记在 `~/.video-studio/history.json`）。
 
 单拍想指定构图，写在数据里即可：
 
@@ -150,17 +150,10 @@ python vs.py setup --test 测试图.png                          # 立刻验证�
     "progress_bar": { "height": 4, "color": "#e0455f" },
     "overlay": { "src": "assets/logo.png", "x": "W-w-32", "y": "32", "opacity": 0.85 }
   },
-  "segments": [
-    { "id": "intro", "template": "kinetic", "duration": 6.0,
-      "data": { "eyebrow": "开场", "title": "一句话结论" },
-      "assets": { "subject": "assets/hero.png" } }
-  ],
-  "timeline": [
-    { "segment": "intro" },
-    { "segment": "body", "transition": { "type": "fade", "duration": 0.5 } },
-    { "source": "existing-clip.mp4", "trim": [12.0, 15.5] },
-    { "source": "photo.png", "trim": [0, 4.0], "zoom": { "from": 1.02, "to": 1.12, "pan": "left" } }
-  ],
+  "duration": 24.0,
+  "scene": "scenes/take.html",
+  "hold": [[6.0, 11.0]],              // 这几秒画面真的不变，渲染器复用一帧
+  "data": { "title": "…", "caption": "…" },
   "audio": {
     "tracks": [
       { "src": "assets/voice.wav", "role": "voice", "gain_db": -3 },
@@ -175,34 +168,87 @@ python vs.py setup --test 测试图.png                          # 立刻验证�
 
 要点：
 
-- `segments` 是**要渲染的内容**，`timeline` 是**组装顺序**。没进 timeline 的段落不会渲染，不花时间。
-- timeline 里既能放渲染段落（`segment`），也能放**已有素材**（`source`），两者可随意混排——这是混剪的基础。
-- 图片素材会自动循环成视频流；`zoom` 给它加推拉摇移（Ken Burns）。
-- `speed: 1.25` 让素材加速播放，时长与转场位置自动重算。
-- `duration` 可写数字（下限），也可写 `"auto"`（完全由旁白长度决定）。
+- **整片是一个镜头**：`duration` 是总时长，`scene` 是唯一那个场景文件；没有 `segments`，没有
+  `timeline`，没有转场——换场是镜头内的变换（见 [references/choreography.md](references/choreography.md)）。
+- **静止要声明**：`hold` 列出的区间渲染器只渲一帧、其余复用。没声明的静止会被验收算成死拍。
+- **数据随便放**：`data` 里写什么，场景里就通过 `window.SCENE` 读什么；技能不规定字段。
+- **素材**：`assets` 里的相对路径按工程目录解析；图片也可写成 `{ "prompt": "…" }` 交给
+  `imagegen` 生成。
+- **多镜头是例外**：只有混剪（`vs.py montage`）用 `timeline` 拼 `source` 片段，因为那本来就是
+  多镜头。
 
 ---
 
-## 模板
+## 场景：整片就是一个文件
 
-| 模板 | 适合 | 主要字段 |
-| --- | --- | --- |
-| `kinetic` | 开场、章节页、片尾（6-10 秒最佳） | `eyebrow` `title` `subtitle` `rows` `callout` |
-| `caption` | 解说、口播、长视频正文 | `chapter` `title` `subtitle` `rows` `caption` |
-| `pixel` | 像素风（自动把图片转精灵） | `title` `cn` `sprite` `rows` |
-| `stat` | 大数字计数，短视频钩子 | `value` `decimals` `suffix` `label` |
-| `quote` | 金句 / 停顿卡 | `quote` `author` `source` |
-| `terminal` | 技术解说、代码演示 | `lines[{text,kind}]` `charsPerSecond` `cards[{label,value}]` `logLines` `statLabel` |
-| `chart` | 数据条形图 | `chart{unit,max}` `series[{label,value,color}]` |
+**技能不分段。** 一个项目 = 一个场景文件 + 一个总时长，整片从 t=0 连续到结束：
 
-七个模板读同一套字段，缺什么跳过什么。要自己的样式：复制任意模板 HTML，
-保持 `window.seek(t)` 约定，再用 `"template": "路径/我的.html"` 指过去。
+```jsonc
+{ "name": "我的片子",
+  "video": { "width": 1920, "height": 1080, "fps": 30, "crf": 20 },
+  "duration": 24.0,
+  "scene": "scenes/take.html",
+  "hold": [[6.0, 11.0]],                    // 这几秒画面真的不变，渲染器复用一帧
+  "data": { "title": "…", "caption": "…" } }
+```
+
+三条硬约束（不满足就没法逐帧渲染）：**离线**、**`seek(t)` 是 t 的纯函数**（不能有
+`requestAnimationFrame`、`Date.now()`、CSS transition）、**同一个 t 必然同一帧**。
+
+作者只需要写 `seek(t)`。`Scene` / `Anim` / `Kit` 三个运行时由渲染器注入，场景文件里不用
+`<script src>`——因为场景会被复制进工程，任何相对路径都会断。可用的接线：
+
+```js
+const S = Scene.mount({ background: "#0b0d0c" });  // 或什么都不传
+const layer = S.layer("type");
+Scene.type(el, 0.16, { weight: "600", color: "#f2f4f1" });  // 字号按短边比例，720p 到 4K 都成立
+const box = Scene.safe();       // 竖向安全区：顶部 6% / 底部 12%
+Scene.ready();                  // 置 __sceneReady
+window.seek = (t) => { /* 全部画面都是 t 的函数 */ };
+```
+
+**换场不靠剪辑**，只有四种手法：移出/移入、把一件东西变成下一件、用画面里的元素横扫替换、
+一次明暗呼吸。怎么编排、有哪些闸门，见 [references/choreography.md](references/choreography.md)。
+
+`vs.py init 我的项目 --duration 20` 会生成一份配置 + 一个空白场景（只有管线，没有任何设计）。
+
+## 编排规则：每支片子现写画面，不要套模板
+
+[references/choreography.md](references/choreography.md) 是这个项目的编排规范。它只解决一件事：
+**技能不再提供模板：原来的七个骨架已经删除。** 现在的流程是每一拍现写一个场景文件，
+`seek(t)` 与 `Scene`/`Anim`/`Kit` 的接线由渲染器负责。同一套骨架出现在第二支片子里，它就是 AI 味。
+
+立论是可测量的：模板复用的失败形态是**静帧没设计** —— 关掉动效看那一帧，如果它只是
+"居中大标题 + 一行副标题"，那这支片子的画面从来就没被设计过。所以规范里最重要的一条闸门是
+**静帧闸门**：先让这一帧在不动的时候能站住，再让它动起来。
+
+文档里有什么：
+
+- **七步编排流程**：定沟通任务 → 选宏观结构 → 抽取主题的物理 → 发明签名机制 →
+  定视觉系统 → 逐拍编排 → 两遍批判
+- **五种宏观结构**（单一场景 / 幕 / 编辑式 + 定点节目 / 索引 / 单屏仪器）与它们各自适合什么
+- **六个生成算子**（直译物理 / 输入反转 / 维度替换 / 介质想象 / 杂交 / 破坏规则），
+  用来给每一支片子发明一个"只属于这个题目"的机制
+- **视觉硬数字**：色彩三档 60/30/10、字号跳跃 ≈ 8×（获奖作品实测中位数）、
+  版式双峰不要居中列、一个构成而不是一堆面板
+- **动效 token**：时长档位、缓动字典（带 cubic-bezier 数值）、弹簧档位、错开档位、变换预算
+- **十二条时间轴铁律**：死拍是几层平台期撞在一起、一个窗口只放一件事（淡入会吃掉同窗口
+  的一切）、零速度关键帧后面必然有死拍、装置不能比内容活得久、每一拍都要有一张 money
+  frame、灵动 vs 飘是静止比例问题
+- **查重表**：现在已经用滥的骨架（大数字 + 小标签、三栏卡片、终端打字、满屏淡入淡出……），
+  换片子前先查一遍，用完把新机制写回去
+- **闸门**：静帧闸门、AI 味清单（A1–A8 / B1–B8）、多样性与死拍闸门（跑 `plan` 看
+  `adjacent_layout_repeats` 和 `choreography.worst_gap`）
+
+规则不是凭空写的：它们是从动效网页设计的「不用模板编排自定义设计」「AI 味闸门」
+「多轨时间轴编排」「动效 token」，前端设计的「每页一个签名、两遍批判」，以及演示文稿设计
+的「一页一个主张、一个构成而不是一堆面板」里挑出来、改写成视频语言的，§10 里逐条标了出处。
 
 ---
 
 ## 旁白：让时长跟着语音走
 
-写一份纯文本台词（一行一句，对应时间线上第 1、2、3… 个段落）：
+写一份纯文本台词。单镜头里，整镜时长由念完这段台词的时间决定：
 
 ```
 把视频做出来，其实只需要写一个配置文件。
@@ -219,7 +265,7 @@ python vs.py run 项目\project.json
 它会做四件事：
 
 1. 逐句合成语音（离线，不联网，不需要 API key）；
-2. **把每个段落时长设为"念完这句的时间 + 前后留白"**；
+2. **把整镜时长设为"念完这段台词的时间 + 前后留白"**；
 3. 把各句拼成一条连续音轨（按时间点插入静音）；
 4. 生成同步 SRT 并烧进画面。
 
@@ -232,50 +278,27 @@ python vs.py run 项目\project.json
 
 ## 长视频（5 分钟以上）
 
-五分钟视频 = 20-40 个段落，不要想成一条时间线。
-
-**关键杠杆：静态段落。**
+**成本 = 帧数 = 时长 × 帧率 ÷ 并发。** 5 分钟 1080p/30fps 是 9000 帧，单并发约 58 分钟，
+`jobs: 3` 约 20 分钟。以前可以靠"静态段落"省钱，现在没有段落了，改成在**镜头内部**声明静止：
 
 ```jsonc
-{ "id": "ch03", "template": "caption", "duration": 24.0,
-  "data": { "still": true, "title": "第三步：交付", "caption": "把结论写成一句话。" },
-  "assets": { "subject": "assets/fig03.png" } }
+"duration": 300,
+"hold": [[12.5, 26.0], [58.0, 96.0], [140.0, 205.0]]
 ```
 
-`"still": true` 只渲染一帧，再由 ffmpeg 保持住，**成本与时长无关**。
-实测：1080p 的 60 秒静态段落端到端 14 秒；逐帧渲染要 23 分钟。
+hold 里的帧是复用的，所以那几秒在成片里照样存在，但只花一帧的成本。5 分钟片的经验值：
+**真正在动的秒数压到 90 秒以内**，其余全部 hold；用 `vs.py plan` 看 `frames_to_render` 与每段
+`hold` 的拆分。还是太贵就降规格：1280×720 约减半，`fps: 24` 再省五分之一，像素风（320×180）
+约快 15 倍。
 
-渲染速度实测（30fps）：
+结构上，5 分钟的单镜头依然要有节奏，只是不靠切：目标 **8-12 个内部章节**，每章一次真正的
+画面重构（不是"淡入更多字"），配上章节标签与全局进度条。细节见
+[references/longform.md](references/longform.md)。
 
-| 分辨率 | 每帧耗时 | 5 分钟视频（逐帧） | 5 分钟视频（jobs=3） |
-| --- | --- | --- | --- |
-| 1920×1080 | ~384 ms | ~58 分钟 | ~20 分钟 |
-| 1280×720 | ~180 ms | ~27 分钟 | ~10 分钟 |
-| 320×180（像素风 scale=4） | ~25 ms | ~4 分钟 | — |
-| 静态段落 | 只渲一帧 | 几秒 | — |
+## 混剪（唯一允许分段的形态）
 
-所以长视频策略是：**只让该动的地方动**。动效留给开场、章节切换和真正的演示，
-正文用静态段落，配 `chapter` 章节标签与 `progress_bar` 进度条。
-
-流程：写旁白 → 一个自然段一个段落 → `narrate` 定时 → `plan` 看预算 → `run`。
-
----
-
-## 混剪
-
-```powershell
-python vs.py montage 素材文件夹 --music 音乐.mp3 --out 混剪.json --duration 60 --style energy --title "标题"
-python vs.py plan 混剪.json
-python vs.py run 混剪.json
-```
-
-它会：扫描文件夹里的图片和视频并逐个探测时长 → 检测音乐节拍与 BPM →
-按节拍切镜头（风格 `energy` / `punch` / `calm` 决定镜头长度区间）→ 图片自动加推拉摇移、
-视频自动取中段并偶尔 1.25 倍速 → 每隔几刀插间黑转场换气 → 响度归一化到平台标准。
-
-生成的是**普通工程文件**，可以继续手改，也可以只当草稿。
-
----
+混剪按定义就是多镜头，所以它是这套"一镜到底"规则**唯一**的例外：素材是现成片段，镜头长度由
+音乐决定。其余所有项目都走单镜头。
 
 ## 像素风
 
@@ -284,13 +307,46 @@ python vs.py run 混剪.json
 ```
 
 - 渲染分辨率自动变为 `宽/scale`，再由 ffmpeg 用最近邻整数倍放大；
-- `pixel` 模板会把 `assets.subject` 自动转成精灵（BOX 降采样 → Alpha 二值化 → 限色 → 1px 描边）；
+- 想要像素精灵：先用 `vs.py sprite assets/subject.png` 转出来，再把结果当普通素材传给场景；
 - 动作必须落在整数像素上，否则放大后会抖动；
 - 预设配色见 `assets/palettes.json`：`pixel16`、`gameboy`（配 `colors: 4`）、`mono`（配 `colors: 2` + `dither: "bayer"`）。
 
 ---
 
 ## 自动验收（这工具最值钱的部分）
+## 手艺层：动画 / 演示 / 版式三套规则
+
+[references/craft.md](references/craft.md) 是编排规则的**手艺层**——编排讲一支片子怎么走，
+这份讲每一帧和每一次运动怎么做对，来源是动画与设计领域的经典教程，并且逐条转成了可检查的形式：
+
+- **动画十二原则**（挤压拉伸、预备动作、跟随与重叠、弧线、慢入慢出、二次动作、时间、夸张…）
+  翻译成本管线里的检查项，并补上"同时有 3 个以上东西在动"这类反例
+- **演示设计四原则**（对比 / 重复 / 对齐 / 亲密性）加上断言式标题、一屏一个主张、
+  数据墨水比、故事线 SCQA、图表的四条硬规则
+- **版式与前端设计**：三分 / 九宫格 / 三角形 / Z 形 / 留白、8pt 网格、模块化字号阶梯、
+  4-8× 字号跳跃、对比度阈值、安全区、格式塔分组，以及"居中一切"这类反例清单
+- **三条可直接投喂的提示词**：用十二原则审运动、用四原则审一屏、用构图法审版式
+
+凡引用之处都在文件末尾标了出处（书与作者），文件本身是重新组织的检查表，不是原文摘录。
+
+## 高级技法提示词库
+
+[references/prompts.md](references/prompts.md) 是一份可以直接投喂给 AI 的提示词库（中文），
+覆盖三类“高级”内容：
+
+- **色彩与色阶**：chroma-js / colorjs.io / culori / d3-scale 的选型与授权，sequential /
+  diverging / qualitative 三种色阶，LCh 感知均匀插值，对比度与色盲校验。另外把容易混淆的
+  **视频侧色阶**（有限/全范围、`zscale`、HDR→SDR）分清楚——那些是 ffmpeg 滤镜链的活。
+- **外接动效动画库**：Lottie / Rive / Theatre.js / GSAP / anime.js / Three.js / PixiJS
+  的授权（已逐条核对）与“能不能按时间求值”的筛选标准，离线 vendor 流程，以及这个项目
+  踩过的坑：`file://` 下 `mask-image` 被当跨域、rAF 破坏帧精确、wasm 路径、字体回退、
+  体积与署名。
+- **设计与分镜**：分镜表字段与 `brief` 字段的对应关系、镜头语言与构图清单、色彩脚本与
+  视觉母题、节奏安排，以及“审一遍分镜哪里会让人看不懂”这类质检提示词。
+
+整份文件只有一句硬判断：**能被 `seek(t)` 驱动的库才能进场景，而且它的 dist 必须随仓库
+走——渲染过程不联网。**
+
 
 `verify` 会解码成片并测量：
 
@@ -313,7 +369,7 @@ python vs.py run 混剪.json
 ## 常见问题
 
 **改了配置要重渲全部吗？**
-不用。每个段落独立缓存，缓存键包含模板内容、数据、素材修改时间和输出规格；没改的段落直接复用。
+不用。每个段落独立缓存，缓存键包含场景文件内容、数据、素材修改时间和输出规格；没改的段落直接复用。
 强制重渲加 `--force`。
 
 **中间文件在哪？能删吗？**
@@ -341,13 +397,16 @@ video-studio/
 ├─ LICENSE                  MIT（含第三方组件说明）
 ├─ agents/openai.yaml       界面元数据
 ├─ assets/
-│  ├─ templates/            7 个画面模板（HTML + JS）
+│  ├─ scenes/_blank.html    空白场景骨架（只有管线，没有任何设计）
 │  ├─ examples/             三个可运行示例工程
-│  └─ palettes.json         配色预设
+│  ├─ palettes.json         配色预设
+│  └─ runtime/scene.js      场景接线：mount / type / safe / ready
 ├─ references/
 │  ├─ pipeline.md           原理、失败模式、性能数据
 │  ├─ longform.md           长视频工作流
 │  ├─ formats.md            各种形态的做法
+│  ├─ prompts.md            高级技法提示词库（色彩色阶 / 外接动效库 / 设计分镜）
+│  ├─ choreography.md       编排规则：每拍现写画面，不套模板（含闸门与查重表）
 │  └─ guide-zh.md           中文速查
 ├─ scripts/
 │  ├─ vs.py                 命令行入口
