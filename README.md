@@ -18,7 +18,7 @@
 
 ```bash
 # 1. 克隆到技能目录（Codex 会自动发现）
-git clone https://github.com/<你的账号>/video-studio.git ~/.codex/skills/video-studio
+git clone https://github.com/soaing2024/Video-studio.git ~/.codex/skills/video-studio
 
 # Windows 上你的技能目录可能是 %USERPROFILE%\.agents\skills\
 # 2. 检查依赖并自动安装 ffmpeg
