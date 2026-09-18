@@ -192,7 +192,7 @@ python vs.py setup --test 测试图.png                          # 立刻验证�
 | `pixel` | 像素风（自动把图片转精灵） | `title` `cn` `sprite` `rows` |
 | `stat` | 大数字计数，短视频钩子 | `value` `decimals` `suffix` `label` |
 | `quote` | 金句 / 停顿卡 | `quote` `author` `source` |
-| `terminal` | 技术解说、代码演示 | `lines[{text,kind}]` `charsPerSecond` |
+| `terminal` | 技术解说、代码演示 | `lines[{text,kind}]` `charsPerSecond` `cards[{label,value}]` `logLines` `statLabel` |
 | `chart` | 数据条形图 | `chart{unit,max}` `series[{label,value,color}]` |
 
 七个模板读同一套字段，缺什么跳过什么。要自己的样式：复制任意模板 HTML，
