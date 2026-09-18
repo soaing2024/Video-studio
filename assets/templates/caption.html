@@ -112,7 +112,6 @@ function build() {
   stage.style.background = `linear-gradient(150deg, #0b1120 0%, ${C.bg} 60%, #04060d 100%)`;
 
   const scene = new Anim.Scene();
-  scene.driftDefaults(M.drift || {}, S.id || "caption");
   const beats = CH.beats || [];
   const first = (kind) => beats.find(b => b.kind === kind) || null;
   const all = (kind) => beats.filter(b => b.kind === kind);
@@ -198,9 +197,7 @@ function build() {
   const bandA = scene.actor(band, { opacity: 0, y: 26 });
   const bandTextA = scene.actor(bandText, { opacity: 1, y: 0, blur: 0 });
 
-  // 34 units of clearance, not 14: this line sits at the very bottom edge, and drift plus the camera
-  // can move it ~20px either way, so the smaller margin pushed it out of frame.
-  const footer = el(layerFg, "div", { position: "absolute", right: `${pad}px`, bottom: `${34 * s}px`,
+  const footer = el(layerFg, "div", { position: "absolute", right: `${pad}px`, bottom: `${14 * s}px`,
     fontSize: `${12 * s}px`, color: "#5d6b83", opacity: "0" }, S.footer || "");
   const footerA = scene.actor(footer, { opacity: 0 });
 
@@ -209,12 +206,14 @@ function build() {
     boxShadow: `0 0 ${14 * s}px ${rgba(C.accent, 0.6)}` });
   const gaugeA = scene.actor(gauge, { width: 0, opacity: 0 });
 
-  // One spline through the whole shot: the camera never restarts from a standstill, and a hard
-  // reframe at a restage is a jump in the same track rather than a special case.
   let camActor = new Anim.Actor(document.createElement("div"), { x: 0, y: 0, scale: 1, rot: 0, opacity: 1 });
-  const camKeys = (M.camera_keys && M.camera_keys.length) ? M.camera_keys : null;
-  const camPath = camKeys ? new Anim.Path(camKeys) : null;
-  const CUTS = M.cuts || [];
+  const track = (M.camera_track && M.camera_track.length) ? M.camera_track : null;
+  if (track) {
+    for (const wp of track) {
+      camActor.to({ x: wp.x, y: wp.y, scale: wp.scale, rot: wp.rot },
+                  { at: wp.t, dur: wp.dur, ease: wp.ease, arc: wp.arc, spring: 0.3, damping: 0.8 });
+    }
+  }
   const camLayers = [{ node: layerBg, depth: DEPTH.bg }, { node: layerMid, depth: DEPTH.mid },
                      { node: layerFg, depth: DEPTH.fg }];
   const camHits = all("emphasis").map(b => b.t);
@@ -236,19 +235,13 @@ function build() {
   const texts = [S.caption || S.subtitle || ""].concat(S.captionVariants || []);
   let textIdx = 0;
 
-  // Bullets belong to the shot, not to one beat: revealing them only on a build beat left all of
-  // them invisible for the whole shot whenever the beat sheet had no build.
-  bullets.forEach((bl, i) => {
-    bl.actor.to({ opacity: 1, x: 0 }, { at: est.t + 0.9 + i * 0.09, dur: 0.55, ease: "out", anticipation: 0.12 });
-    bl.dot.to({ scale: 1, opacity: 1 }, { at: est.t + 0.95 + i * 0.09, dur: 0.4, spring: 0.9, damping: 0.45 });
-  });
-
   beats.filter(b => !["establish", "exit"].includes(b.kind)).forEach((b, n) => {
     const I = b.intensity || 1;
     if (b.kind === "build") {
-      bullets.forEach((bl, i) => bl.actor.to({ scale: 1 + 0.03 * I },
-        { at: b.t + i * 0.06, dur: 0.35, ease: "out" }));
-      bullets.forEach(bl => bl.actor.to({ scale: 1 }, { at: b.t + 0.45, dur: 0.5, ease: "out" }));
+      bullets.forEach((bl, i) => {
+        bl.actor.to({ opacity: 1, x: 0 }, { at: b.t + i * 0.09, dur: 0.55, ease: "out", anticipation: 0.12 });
+        bl.dot.to({ scale: 1, opacity: 1 }, { at: b.t + i * 0.09 + 0.05, dur: 0.4, spring: 0.9, damping: 0.45 });
+      });
     } else if (b.kind === "swap" && altActors.length) {
       wordActors.forEach((w, i) => w.actor.to({ opacity: 0, y: -34, blur: 6 },
             { at: b.t + i * 0.03, dur: 0.3, ease: "in" }));
@@ -299,8 +292,7 @@ function build() {
     bandA.to({ y: 10 }, { at: ex.t, dur: 0.4, ease: "in" });
   }
 
-  return { s, scene, tex, halo, sweep, vign, panel, plate: panel, camActor, camPath, cuts: CUTS,
-           camLayers, camHits,
+  return { s, scene, tex, halo, sweep, vign, panel, plate: panel, camActor, camLayers, camHits,
 chipA, band, bandText, blobs };
 }
 
@@ -328,7 +320,7 @@ window.seek = (t) => {
   }
 
   if (L.blobs) L.blobs.forEach(b => b.render(t));
-  const cam = L.camPath ? L.camPath.sample(t) : L.camActor.sample(t);
+  const cam = L.camActor.sample(t);
   let bump = 0;
   for (const h of L.camHits) {
     if (t <= h) continue;
@@ -342,8 +334,7 @@ window.seek = (t) => {
   for (const lay of L.camLayers) {
     const d = lay.depth;
     lay.node.style.transform =
-      // camera units are 1280x720; the viewport may not be, so travel scales with it.
-      `translate3d(${(((cam.x || 0) * d) * s + sx).toFixed(2)}px, ${(((cam.y || 0) * d) * s + sy).toFixed(2)}px, 0) ` +
+      `translate3d(${((cam.x || 0) * d + sx).toFixed(2)}px, ${((cam.y || 0) * d + sy).toFixed(2)}px, 0) ` +
       `scale(${(1 + (camScale - 1) * d).toFixed(5)}) rotate(${((cam.rot || 0) * d).toFixed(3)}deg)`;
   }
   L.scene.seek(t, null);

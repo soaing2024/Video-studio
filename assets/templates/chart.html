@@ -54,8 +54,6 @@ function build() {
     `linear-gradient(160deg, #0d1428 0%, ${C.bg} 60%, #05070e 100%)`;
   const kit = Kit.buildStage(stage, {});
   const scene = new Anim.Scene();
-  // Perpetual motion for every actor made from here on, so no two frames of the shot match.
-  scene.driftDefaults(M.drift || {}, S.id || "chart");
   const particles = Kit.seedParticles(PARTICLES, S.id || "chart", W(), H());
 
   const tex = Kit.el(kit.layerBg, "div", Object.assign({ position: "absolute", inset: "0", opacity: "0" },
@@ -233,8 +231,7 @@ window.seek = (t) => {
                       pulseAmount: (M.pulse && M.pulse.amount) || 0.01,
                       pulseFreq: (M.pulse && M.pulse.freq) || 1,
                       sweepSpeed: (M.sweep && M.sweep.speed) || 340,
-                      sweepOpacity: (M.sweep && M.sweep.opacity) || 0.09,
-                      cuts: M.cuts || [] });
+                      sweepOpacity: (M.sweep && M.sweep.opacity) || 0.09 });
   Kit.drawParticles(L.kit.ctx, L.particles, t, C.text, W(), H());
 
   // values keep ticking a little so the labels are never perfectly frozen

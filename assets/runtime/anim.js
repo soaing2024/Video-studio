@@ -43,38 +43,6 @@
     return (p - a) / (1 - a);
   }
 
-  /* Perpetual drift: the difference between "an element that arrived" and "an element that is
-   * alive". Keyframes decide where a thing is going; this decides that it is never exactly still
-   * while it is there.
-   *
-   * Two incommensurate frequencies, phased per element, so no two elements move together and the
-   * pattern never repeats inside a shot. That is what makes frame t and frame t+1/6s differ even
-   * after every keyframed move has finished - the reason a shot can hold one composition without
-   * the eye reading a still image.
-   */
-  const TAU = Math.PI * 2;
-  function driftAt(t, cfg, phase) {
-    if (!cfg) return null;
-    const p = phase || 0;
-    const f1 = cfg.fx === undefined ? 0.21 : cfg.fx;
-    const f2 = cfg.fy === undefined ? 0.34 : cfg.fy;
-    const f3 = cfg.fz === undefined ? 0.83 : cfg.fz;
-    // Three incommensurate rates, not two: the slow pair is the visible wander, and the fast third
-    // is what keeps a run of consecutive frames from landing on the same pixels.
-    // Amplitudes are given in 1280x720 units like every layout number, so they scale with the
-    // viewport. Left in raw pixels the same shot wandered twice as far at half size.
-    const view = (global.innerHeight || 720) / 720;
-    const wx = (u) => 0.60 * Math.sin(TAU * (f1 * t + p)) +
-                    0.28 * Math.sin(TAU * (f2 * t + u)) +
-                    0.12 * Math.sin(TAU * (f3 * t + u * 2.2));
-    return {
-      x: (cfg.x || 0) * view * wx(p * 1.7),
-      y: (cfg.y || 0) * view * wx(0.4 - p * 1.3),
-      rot: (cfg.rot || 0) * wx(2.1 + p),
-      scale: 1 + (cfg.scale || 0) * wx(1.2 - p * 0.8)
-    };
-  }
-
   const isColor = (v) => typeof v === "string" && v.trim().startsWith("#");
   const lerp = (a, b, p) => a + (b - a) * p;
   const hex2 = (h) => {
@@ -93,65 +61,6 @@
     return p < 1 ? a : b;
   }
 
-  const POSE_KEYS = ["x", "y", "scale", "rot"];
-  function poseOf(k) {
-    return { x: k.x || 0, y: k.y || 0, scale: k.scale === undefined ? 1 : k.scale, rot: k.rot || 0 };
-  }
-
-  /* A camera track that never restarts from zero velocity.
-   *
-   * Keys are {t, x, y, scale, rot}. Between keys the value follows a cubic Hermite with tangents
-   * estimated from the neighbouring keys (Catmull-Rom), so the move into a beat and the move out
-   * of it share a direction. Eased waypoints restart from zero velocity at every beat, which reads
-   * as a series of nudges; a spline through the same keys reads as one continuous move.
-   *
-   * A key flagged `cut: true` starts a new piece: tangents never reach across it. Because the
-   * generator emits the outgoing key a millisecond earlier, the sample jumps there - which is
-   * exactly a reframe inside the shot, expressed in the same structure rather than as a special
-   * case.
-   */
-  class Path {
-    constructor(keys) {
-      this.keys = (keys || []).slice().sort((a, b) => a.t - b.t);
-    }
-    _tangent(i, k) {
-      const K = this.keys;
-      if (K.length < 2) return 0;
-      const cur = K[i];
-      if (cur.cut) return 0;                     // one-sided at the start of a new piece
-      const nxt = K[i + 1];
-      if (nxt && nxt.cut) return 0;              // one-sided at the end of a piece
-      const prev = K[i - 1];
-      if (!prev) return (nxt[k] - cur[k]) / Math.max(1e-6, nxt.t - cur.t);
-      if (!nxt) return (cur[k] - prev[k]) / Math.max(1e-6, cur.t - prev.t);
-      return (nxt[k] - prev[k]) / Math.max(1e-6, nxt.t - prev.t);
-    }
-    sample(t) {
-      const K = this.keys;
-      if (!K.length) return { x: 0, y: 0, scale: 1, rot: 0 };
-      if (t <= K[0].t) return poseOf(K[0]);
-      if (t >= K[K.length - 1].t) return poseOf(K[K.length - 1]);
-      let i = 0;
-      for (let j = 0; j < K.length; j++) if (K[j].t <= t) i = j;
-      const a = K[i], b = K[i + 1];
-      const dt = Math.max(1e-6, b.t - a.t);
-      const u = clamp01((t - a.t) / dt);
-      const out = {};
-      for (const k of POSE_KEYS) {
-        const av = a[k] === undefined ? (k === "scale" ? 1 : 0) : a[k];
-        const bv = b[k] === undefined ? (k === "scale" ? 1 : 0) : b[k];
-        const ma = this._tangent(i, k) * dt;
-        const mb = this._tangent(i + 1, k) * dt;
-        const h00 = 2 * u * u * u - 3 * u * u + 1;
-        const h10 = u * u * u - 2 * u * u + u;
-        const h01 = -2 * u * u * u + 3 * u * u;
-        const h11 = u * u * u - u * u;
-        out[k] = h00 * av + h10 * ma + h01 * bv + h11 * mb;
-      }
-      return out;
-    }
-  }
-
   class Actor {
     /* props: x, y, scale, rot, opacity, blur, width, height, clip, color, radius, skew */
     constructor(node, initial, opts) {
@@ -160,8 +69,6 @@
                                   width: null, height: null, clip: 0, color: null, radius: null,
                                   skew: 0 }, initial || {});
       this.opts = Object.assign({ origin: "50% 50%", units: {} }, opts || {});
-      this.drift = this.opts.drift || null;
-      this.phase = this.opts.phase === undefined ? 0 : this.opts.phase;
       this.segs = [];
       this.static = Object.assign({}, this.base);
     }
@@ -209,18 +116,6 @@
     }
 
     sample(t) {
-      const state = this._sampleKeys(t);
-      const d = driftAt(t, this.drift, this.phase);
-      if (!d) return state;
-      state.x = (state.x || 0) + d.x;
-      state.y = (state.y || 0) + d.y;
-      state.rot = (state.rot || 0) + d.rot;
-      state.scale = (state.scale === undefined ? 1 : state.scale) * d.scale;
-      return state;
-    }
-
-    /* The keyframed state on its own, without the perpetual drift. */
-    _sampleKeys(t) {
       let state = Object.assign({}, this.base);
       let active = null;
       for (const s of this.segs) {
@@ -260,9 +155,9 @@
       const s = this.sample(t);
       const parts = [];
       if (s.x || s.y) parts.push(`translate3d(${(s.x || 0).toFixed(2)}px, ${(s.y || 0).toFixed(2)}px, 0)`);
-      if (s.rot) parts.push(`rotate(${s.rot.toFixed(4)}deg)`);
-      if (s.skew) parts.push(`skewX(${s.skew.toFixed(4)}deg)`);
-      if (s.scale !== 1) parts.push(`scale(${s.scale.toFixed(6)})`);
+      if (s.rot) parts.push(`rotate(${s.rot.toFixed(3)}deg)`);
+      if (s.skew) parts.push(`skewX(${s.skew.toFixed(3)}deg)`);
+      if (s.scale !== 1) parts.push(`scale(${s.scale.toFixed(5)})`);
       const st = this.node.style;
       st.transformOrigin = this.opts.origin;
       st.transform = parts.length ? parts.join(" ") : "none";
@@ -283,24 +178,9 @@
       this.actors = [];
       this.cam = null;
       this.layers = [];
-      this.drift = null;      // set with driftDefaults(): applied to every actor made from here on
-      this._count = 0;
-    }
-    /* Turn on perpetual motion for the whole shot. The amplitude is that of a mid-ground element;
-     * each actor gets a different phase, so the frame never settles into a loop. */
-    driftDefaults(cfg, seed) {
-      this.drift = Object.assign({ x: 6, y: 4.5, rot: 0.12, scale: 0.0022 }, cfg || {});
-      this._seed = String(seed === undefined ? "drift" : seed);
-      return this;
     }
     actor(node, initial, opts) {
-      const o = Object.assign({}, opts || {});
-      if (this.drift && o.drift === undefined) {
-        o.drift = this.drift;
-        o.phase = (this._count * 0.37 + (this._seed || "").length * 0.011) % 1;
-      }
-      this._count++;
-      const a = new Actor(node, initial, o);
+      const a = new Actor(node, initial, opts);
       this.actors.push(a);
       return a;
     }
@@ -342,5 +222,5 @@
     }
   }
 
-  global.Anim = { Actor, Scene, Path, EASE, spring, clamp01, mixColor, driftAt, TAU };
+  global.Anim = { Actor, Scene, EASE, spring, clamp01, mixColor };
 })(window);

@@ -98,7 +98,7 @@ footage enters a montage.
 `kinetic`, `caption` and `pixel` all read the same keys and ignore what they do not need:
 `eyebrow`, `title`, `titleSize`, `subtitle`, `cn`, `rows[{label,value,weight,color}]`,
 `callout{c1,c2}`, `footer`, `caption`, `chapter{index,total,label}`, `colors{...}`, `sprite{...}`,
-`anim_fps` and `still: true`.
+and `still: true`.
 
 Assets: `subject` (any image; `pixel` auto-converts it to a sprite), `sprite` plus `spriteShadow`
 (pre-made), `background`.
@@ -110,15 +110,8 @@ path as `template` when none of the three fit.
 
 - **One idea per segment.** 4-12s for a short, 8-20s for an explainer; a 5-minute video is 20-40
   segments, not one long animation.
-- **Keep the frame alive.** A shot is only an animation if no two consecutive frames match:
-  templates get perpetual drift from `scene.driftDefaults`, a spline camera from `Anim.Path`, and
-  a composition change every 1.8-3.0s from the `relayout` / `restage` beats. `verify` gates this
-  with `alive` (frozen-frame share <= 15% plus declared static runtime). See
-  [references/animation.md](references/animation.md).
-- **Long shots are cheap by frame rate, not by being still.** `"anim_fps": 12` renders at 12fps and
-  the assembler duplicates frames back up, which costs 2.5x less than 30fps and still moves.
-  `"still": true` renders one frame and holds it - correct for a real title card, and the reason a
-  long video built from them looks like a slide deck.
+- **Held shots are free.** `"still": true` renders a single frame and holds it, so a 60s slide costs
+  the same as a 1s clip. Use it for talking-head and slide sections of long videos.
 - **Every animated value must be a pure function of `t`.** No CSS transitions, no
   `requestAnimationFrame`, no wall-clock time inside a scene.
 - **Pixel look:** render at `width/scale` and let the assembler upscale with nearest. Keep motion on
@@ -139,8 +132,4 @@ path as `template` when none of the three fit.
 - Chinese manual for the human operator: [README.md](README.md) (long form) and
 [references/guide-zh.md](references/guide-zh.md) (one-page cheat sheet).
 - Planning, visual distinctiveness and generated imagery:
-[references/creative.md](references/creative.md).
-- The animation model - why a shot stops reading as a slide, what each mechanism does, the measured
-  numbers, and the checklist for writing a new template: [references/animation.md](references/animation.md).
-
-The animation model - why a shot stops reading as a slide, and the checklist for a new template:
+  [references/creative.md](references/creative.md).

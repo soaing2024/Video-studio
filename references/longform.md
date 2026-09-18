@@ -26,29 +26,23 @@ Duration follows the words: Chinese narration runs roughly 4-5 characters per se
 This ordering matters because the script decides the segment count, and the segment count decides
 the render time. Never design 40 shots and then discover the script is 3 minutes short.
 
-## 3. Render long shots at a lower frame rate, not as one held frame
+## 3. Use held shots for anything static
 
-`"anim_fps": 12` renders the segment at 12 frames per second and lets the assembly step duplicate
-the frames back up to the project rate. Cost scales with frame rate, so this is roughly 2.5x
-cheaper than 30fps - but the shot still moves, which `"still": true` does not:
+`"still": true` renders one frame and holds it for the segment duration. This is the single biggest
+lever on a long video.
 
 ```jsonc
 { "id": "ch03a", "template": "caption", "duration": 24.0,
-  "data": { "anim_fps": 12, "title": "第三步：交付", "caption": "把上面的结论写成一句话。" },
+  "data": { "still": true, "title": "第三步：交付", "caption": "把上面的结论写成一句话。" },
   "assets": { "subject": "assets/fig03.png" } }
 ```
 
-Set it once for the whole project instead with `"render": { "anim_fps": 12 }`, then override it
-on the handful of shots that deserve the full rate.
+Measured: a 60-second 1080p held segment costs ~14 s end-to-end (one rendered frame plus encode),
+versus ~23 minutes if rendered frame by frame. A 5-minute video built mostly from held shots plus a
+few animated segments finishes in a couple of minutes.
 
-`"still": true` still exists and still costs the same as one frame, but it produces a literal
-still image for the length of the segment. Reserve it for genuine title cards and end boards.
-A five-minute video built mostly from held frames is a slideshow, and `verify` will say so: the
-`alive` check counts frames identical to the one before them and budgets for the static runtime
-you actually declared.
-
-Cost scales with the frame rate and nothing else changes, so `anim_fps: 12` is 2.5x cheaper than
-30fps on the same shot - it sits between the two extremes above rather than at either one.
+Reserve full animation for the hook, section transitions, and the diagrams that actually move. If a
+section only holds a slide and a caption, hold it.
 
 ## 4. Budget the render
 

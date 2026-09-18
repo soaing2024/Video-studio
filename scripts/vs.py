@@ -77,10 +77,8 @@ def load_spec(path, want_narration: bool = True, seed: int | None = None) -> dic
     if want_narration and narrate.configured(spec):
         narrate.apply(spec, _ffmpeg(), log=lambda m: print(m, file=sys.stderr))
     style.inject(spec)
-    # The beat sheet is compiled before the motion plan so the camera can be keyed to it: one
-    # timeline for the actors and the frame, instead of two that drift apart.
-    choreography.inject(spec)
     motion.inject(spec)
+    choreography.inject(spec)
     return spec
 
 
