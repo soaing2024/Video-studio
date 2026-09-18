@@ -111,7 +111,9 @@ function build() {
 
   const rows = SERIES.map((d, i) => {
     const y = top + i * rowH;
-    const label = Kit.el(kit.layerFg, "div", { position: "absolute", left: `${92 * s}px`, top: `${y + 6 * s}px`,
+    // 120, not 92: a rank swap steps the whole row 54 units sideways, and with the drift and the
+    // camera on top of that a narrower margin pushed the leftmost label out of the frame.
+    const label = Kit.el(kit.layerFg, "div", { position: "absolute", left: `${120 * s}px`, top: `${y + 6 * s}px`,
       width: `${190 * s}px`, fontSize: `${20 * s}px`, color: C.text, textAlign: "right", opacity: "0" }, d.label);
     const bar = Kit.el(kit.layerMid, "div", { position: "absolute", left: `${plotX}px`, top: `${y}px`,
       width: `0px`, height: `${52 * s}px`, borderRadius: `${4 * s}px`,
@@ -169,7 +171,7 @@ function build() {
     // mid-move and their labels would overlap (the layout audit flags exactly that).
     [[a, yc, 0.0, -1], [c, ya, 0.26, 1]].forEach(([row, targetY, delay, side]) => {
       const dy = -targetY + row.y0;
-      const dx = side * 90 * s;
+      const dx = side * 54 * s;
       [row.labelA, row.barA, row.valA].forEach((actor) => {
         actor.to({ y: dy, x: dx }, { at: b.t + delay, dur: 0.4, ease: "out" });
         actor.to({ x: 0 }, { at: b.t + delay + 0.45, dur: 0.4, ease: "out" });
