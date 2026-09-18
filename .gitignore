@@ -1,0 +1,26 @@
+# 本地构建产物
+build/
+out/
+dist/
+*.log
+
+# 自动下载的 ffmpeg（84MB，且是 GPL 构建）
+# 首次使用运行 `vs.py doctor --install-ffmpeg` 会自动装回来
+vendor/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# Node
+node_modules/
+
+# 编辑器与系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

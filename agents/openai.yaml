@@ -1,0 +1,5 @@
+interface:
+  display_name: "Video Studio"
+  short_description: "Code-driven video: render, edit, verify end to end"
+  brand_color: "#E0455F"
+  default_prompt: "Use $video-studio to turn my assets and idea into a finished video."

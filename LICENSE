@@ -1,0 +1,36 @@
+MIT License
+
+Copyright (c) 2026 Video Studio contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+Note on third-party components
+
+This repository ships source code only. It does NOT bundle ffmpeg or Chromium.
+
+- ffmpeg is installed on demand by `scripts/vs.py doctor --install-ffmpeg`, which vendors an
+  imageio-ffmpeg build into `vendor/` (git-ignored). That build enables libx264 and is therefore
+  licensed under the GPL. If you redistribute this tool together with that binary, or build a
+  commercial product on top of it, review the GPL obligations first, or switch to an LGPL build.
+- Chromium / Playwright (BSD), Node.js (MIT) and Python (PSF) are fetched or supplied by the user's
+  own environment.
+- Templates reference system fonts by name only. Microsoft YaHei and similar system fonts may not be
+  redistributed; ship an open font such as Noto Sans SC / Source Han Sans (SIL OFL) instead.

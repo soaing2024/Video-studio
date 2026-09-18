@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #06080f; }
+  #stage { position: absolute; inset: 0; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+// caption: explainer / long-form workhorse. One idea per segment: chapter chip, headline,
+// media panel, lower-third narration band, footer.
+const S = window.SCENE || {};
+const A = S.assets || {};
+const D = S.duration || 8;
+const stage = document.getElementById("stage");
+const COL = Object.assign({ bg: "#070a14", text: "#f4f7fb", dim: "#9aa8bf", panel: "#0e1322" }, S.colors || {});
+const accent = S.accent || "#e0455f";
+
+const clamp01 = (x) => Math.min(1, Math.max(0, x));
+const easeOutCubic = (x) => 1 - Math.pow(1 - x, 3);
+const easeInOutCubic = (x) => x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+
+const W = () => window.innerWidth, H = () => window.innerHeight;
+let k = 1, L = null, media = null, mediaReady = false;
+
+function make(tag, css, text) {
+  const n = document.createElement(tag);
+  Object.assign(n.style, css);
+  if (text !== undefined) n.textContent = text;
+  stage.appendChild(n);
+  return n;
+}
+
+function hexA(hex, a) {
+  const h = hex.replace("#", "");
+  const n = parseInt(h.length === 3 ? h.split("").map(c => c + c).join("") : h, 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+
+function build() {
+  k = H() / 720;
+  stage.innerHTML = "";
+  stage.style.background = `linear-gradient(150deg, #0b1120 0%, ${COL.bg} 60%, #04060d 100%)`;
+
+  const mediaPanel = make("div", { position: "absolute", right: `${64 * k}px`, top: `${72 * k}px`,
+    width: `${544 * k}px`, height: `${576 * k}px`, borderRadius: `${10 * k}px`,
+    overflow: "hidden", background: COL.panel, opacity: "0" });
+  const mediaInner = make("div", { position: "absolute", inset: "0", backgroundSize: "contain",
+    backgroundRepeat: "no-repeat", backgroundPosition: "center" });
+  mediaPanel.appendChild(mediaInner);
+  const scrim = make("div", { position: "absolute", right: `${64 * k}px`, top: `${72 * k}px`,
+    width: `${544 * k}px`, height: `${576 * k}px`, borderRadius: `${10 * k}px`,
+    background: `linear-gradient(90deg, ${hexA(COL.bg, 0.85)} 0%, ${hexA(COL.bg, 0)} 45%)` });
+
+  const chipLabel = S.chapter
+    ? String(S.chapter.index).padStart(2, "0") + " / " + String(S.chapter.total).padStart(2, "0") +
+      (S.chapter.label ? "   " + S.chapter.label : "")
+    : (S.eyebrow || "");
+  const chip = make("div", { position: "absolute", left: `${72 * k}px`, top: `${72 * k}px`, opacity: "0",
+    padding: `${6 * k}px ${14 * k}px`, border: `${k}px solid ${hexA(accent, 0.7)}`,
+    borderRadius: `${999 * k}px`, fontSize: `${13 * k}px`, letterSpacing: `${2 * k}px`,
+    color: accent }, chipLabel);
+
+  const title = make("div", { position: "absolute", left: `${72 * k}px`, top: `${150 * k}px`,
+    width: `${520 * k}px`, opacity: "0", fontSize: `${(S.titleSize || 46) * k}px`,
+    lineHeight: "1.22", fontWeight: "500", color: COL.text, letterSpacing: `${k}px` },
+    S.title || "");
+
+  const sub = make("div", { position: "absolute", left: `${74 * k}px`, top: `${316 * k}px`,
+    width: `${470 * k}px`, opacity: "0", fontSize: `${19 * k}px`, lineHeight: "1.5",
+    color: COL.dim }, S.subtitle || "");
+
+  const bulletsTop = (S.subtitle ? 400 : 330);
+  const bullets = (S.rows || []).slice(0, 4).map((r, i) => {
+    const row = make("div", { position: "absolute", left: `${74 * k}px`,
+      top: `${bulletsTop + i * 46}px`, opacity: "0", display: "flex",
+      alignItems: "baseline", gap: `${12 * k}px` });
+    row.appendChild(make("div", { width: `${8 * k}px`, height: `${8 * k}px`,
+      background: r.color || accent, borderRadius: `${2 * k}px`, flex: "0 0 auto" }));
+    row.appendChild(make("div", { fontSize: `${17 * k}px`, color: COL.text }, r.value || r.label || ""));
+    return row;
+  });
+
+  const band = make("div", { position: "absolute", left: `${64 * k}px`, right: `${64 * k}px`,
+    bottom: `${48 * k}px`, minHeight: `${86 * k}px`, background: hexA("#04060d", 0.72),
+    borderLeft: `${3 * k}px solid ${accent}`, borderRadius: `${6 * k}px`,
+    padding: `${16 * k}px ${22 * k}px`, opacity: "0" });
+  const caption = make("div", { fontSize: `${24 * k}px`, lineHeight: "1.45", color: COL.text },
+    S.caption || "");
+  band.appendChild(caption);
+
+  const footer = make("div", { position: "absolute", right: `${72 * k}px`, bottom: `${16 * k}px`,
+    fontSize: `${12 * k}px`, letterSpacing: `${k}px`, color: "#5d6b83", opacity: "0" },
+    S.footer || "");
+
+  return { mediaPanel, mediaInner, scrim, chip, title, sub, bullets, band, footer };
+}
+
+L = build();
+window.addEventListener("resize", () => { L = build(); });
+
+if (A.subject) {
+  media = new Image();
+  media.onload = () => { mediaReady = true; window.__sceneReady = true; };
+  media.onerror = () => { mediaReady = true; window.__sceneReady = true; };
+  media.src = A.subject;
+} else {
+  window.__sceneReady = true;
+}
+
+window.seek = (t) => {
+  const fadeOut = 1 - easeOutCubic(clamp01((t - (D - 0.5)) / 0.5));
+  if (mediaReady && media) L.mediaInner.style.backgroundImage = `url("${media.src}")`;
+
+  const zoom = 1 + 0.05 * easeInOutCubic(clamp01(t / Math.max(1, D)));
+  L.mediaPanel.style.opacity = (easeOutCubic(clamp01((t - 0.15) / 0.5)) * fadeOut).toFixed(4);
+  L.mediaPanel.style.transform = `scale(${zoom.toFixed(4)})`;
+  L.scrim.style.opacity = (easeOutCubic(clamp01((t - 0.15) / 0.6)) * fadeOut).toFixed(4);
+
+  L.chip.style.opacity = (easeOutCubic(clamp01((t - 0.2) / 0.45)) * fadeOut).toFixed(4);
+  const pt = clamp01((t - 0.35) / 0.5);
+  L.title.style.opacity = (easeOutCubic(pt) * fadeOut).toFixed(4);
+  L.title.style.transform = `translateY(${((1 - easeOutCubic(pt)) * 18 * k).toFixed(2)}px)`;
+  L.sub.style.opacity = (easeOutCubic(clamp01((t - 0.65) / 0.5)) * fadeOut).toFixed(4);
+
+  L.bullets.forEach((row, i) => {
+    const p = clamp01((t - (0.9 + i * 0.18)) / 0.45);
+    row.style.opacity = (easeOutCubic(p) * fadeOut).toFixed(4);
+    row.style.transform = `translateX(${((1 - easeOutCubic(p)) * -12 * k).toFixed(2)}px)`;
+  });
+
+  const pb = clamp01((t - 1.15) / 0.55);
+  L.band.style.opacity = (easeOutCubic(pb) * fadeOut).toFixed(4);
+  L.band.style.transform = `translateY(${((1 - easeOutCubic(pb)) * 20 * k).toFixed(2)}px)`;
+  L.footer.style.opacity = (0.9 * easeOutCubic(clamp01((t - 0.8) / 0.5)) * fadeOut).toFixed(4);
+};
+
+window.seek(0);
+</script>
+</body>
+</html>

@@ -1,0 +1,73 @@
+{
+  "//": "5-minute explainer: one segment per narration beat, chapter chips, global progress bar.",
+  "name": "example",
+  "video": { "width": 1920, "height": 1080, "fps": 30, "crf": 20, "preset": "medium" },
+  "render": { "jobs": 3, "crf": 12 },
+  "look": {
+    "accent": "#e0455f",
+    "grade": { "saturation": 1.06 },
+    "fade_in": 1.0,
+    "fade_out": 1.5,
+    "progress_bar": { "height": 4, "color": "#e0455f" }
+  },
+  "segments": [
+    {
+      "id": "ch01",
+      "template": "caption",
+      "duration": 9.0,
+      "assets": { "subject": "assets/cover.png" },
+      "data": {
+        "chapter": { "index": 1, "total": 6, "label": "开场" },
+        "title": "先说结论",
+        "subtitle": "这一节讲什么、为什么值得看完",
+        "caption": "把最重要的一句话放在最前面，后面每一节都在兑现它。",
+        "footer": "chapter 01"
+      }
+    },
+    {
+      "id": "ch02",
+      "template": "caption",
+      "duration": 10.0,
+      "assets": { "subject": "assets/fig01.png" },
+      "data": {
+        "chapter": { "index": 2, "total": 6, "label": "背景" },
+        "title": "问题从哪里来",
+        "rows": [
+          { "value": "2023：需求增长 3.2 倍", "color": "#e0455f" },
+          { "value": "2024：成本下降 40%", "color": "#38bdf8" },
+          { "value": "2025：工具开始收敛", "color": "#a78bfa" }
+        ],
+        "caption": "时间线比形容词更有说服力：给出年份和数字，观众自己会得结论。",
+        "footer": "chapter 02"
+      }
+    },
+    {
+      "id": "ch03",
+      "template": "caption",
+      "duration": 45.0,
+      "assets": { "subject": "assets/fig02.png" },
+      "data": {
+        "chapter": { "index": 3, "total": 6, "label": "方法" },
+        "title": "三步法",
+        "subtitle": "拆开、对齐、交付",
+        "caption": "一个 45 秒的长镜头也可以很好拍：媒体缓慢推近，信息分层出现。",
+        "footer": "chapter 03"
+      }
+    }
+  ],
+  "timeline": [
+    { "segment": "ch01" },
+    { "segment": "ch02", "transition": { "type": "fade", "duration": 0.5 } },
+    { "segment": "ch03", "transition": { "type": "fade", "duration": 0.5 } }
+  ],
+  "audio": {
+    "tracks": [
+      { "src": "assets/voice.wav", "at": 1.0, "gain_db": -3 },
+      { "src": "assets/music.mp3", "gain_db": -26, "fade_in": 2.0, "fade_out": 3.0, "loop": true }
+    ]
+  },
+  "subtitles": {
+    "src": "assets/subs.srt",
+    "style": "FontName=Microsoft YaHei,FontSize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H80000000,BorderStyle=1,Outline=2,Shadow=0,MarginV=36"
+  }
+}

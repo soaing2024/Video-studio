@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #0f1220; }
+  canvas { display: block; image-rendering: pixelated; }
+</style>
+</head>
+<body>
+<canvas id="screen" width="320" height="180"></canvas>
+<script>
+// pixel: authored in a fixed 320x180 pixel grid, then scaled by an integer factor.
+const S = window.SCENE || {};
+const A = S.assets || {};
+const D = S.duration || 8;
+const BASE_W = 320, BASE_H = 180;
+const cv = document.getElementById("screen");
+const ctx = cv.getContext("2d");
+const buf = document.createElement("canvas");
+let sprite = null, shadow = null, ready = false, loaded = 0, k = 1;
+
+const clamp01 = (x) => Math.min(1, Math.max(0, x));
+const easeOutCubic = (x) => 1 - Math.pow(1 - x, 3);
+const easeInOutCubic = (x) => x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+
+const C = Object.assign({
+  bg: "#0f1220", bg2: "#171b2c", border: "#2b3350", text: "#e8eef7",
+  dim: "#8b9bb4", dim2: "#5d6b83", red: "#e0455f", cyan: "#38bdf8",
+  green: "#4ade80", amber: "#fbbf24", purple: "#a78bfa", black: "#05070d"
+}, S.colors || {});
+const accent = S.accent || C.red;
+
+function layout() {
+  const W = window.innerWidth, H = window.innerHeight;
+  k = Math.max(1, Math.floor(Math.min(W / BASE_W, H / BASE_H)));
+  cv.width = BASE_W * k; cv.height = BASE_H * k;
+  cv.style.marginLeft = Math.round((W - cv.width) / 2) + "px";
+  cv.style.marginTop = Math.round((H - cv.height) / 2) + "px";
+  ctx.setTransform(k, 0, 0, k, 0, 0);
+  ctx.imageSmoothingEnabled = false;
+}
+
+function px(x, y, w, h, color) { ctx.fillStyle = color; ctx.fillRect(x | 0, y | 0, w, h); }
+
+function text(str, x, y, size, color, weight) {
+  ctx.font = (weight || "") + " " + size + "px 'Microsoft YaHei UI', 'Microsoft YaHei', monospace";
+  ctx.textBaseline = "top";
+  ctx.fillStyle = color;
+  ctx.fillText(str, x | 0, y | 0);
+}
+
+function textWidth(str, size) {
+  ctx.font = size + "px 'Microsoft YaHei UI', 'Microsoft YaHei', monospace";
+  return ctx.measureText(str).width;
+}
+
+function dither(x0, y0, x1, y1, color) {
+  ctx.fillStyle = color;
+  for (let y = y0; y < y1; y += 2)
+    for (let x = x0 + ((y >> 1) & 1); x < x1; x += 2) ctx.fillRect(x, y, 1, 1);
+}
+
+layout();
+window.addEventListener("resize", layout);
+
+if (A.sprite) {
+  sprite = new Image();
+  const total = A.spriteShadow ? 2 : 1;
+  const done = () => { if (++loaded >= total) { ready = true; window.__sceneReady = true; window.seek(0); } };
+  sprite.onload = done; sprite.onerror = done;
+  sprite.src = A.sprite;
+  if (A.spriteShadow) {
+    shadow = new Image(); shadow.onload = done; shadow.onerror = done; shadow.src = A.spriteShadow;
+  }
+} else {
+  window.__sceneReady = true;
+}
+
+window.seek = (t) => {
+  layout();
+  const fadeOut = 1 - easeOutCubic(clamp01((t - (D - 0.6)) / 0.6));
+  const fadeIn = easeOutCubic(clamp01(t / 0.35));
+
+  px(0, 0, BASE_W, BASE_H, C.bg);
+  dither(0, 0, BASE_W, BASE_H, C.bg2);
+
+  // sprite: drop in, then integer-pixel bob and drift
+  const size = S.spriteSize || [66, 98];
+  const p = clamp01((t - 1.9) / 0.5);
+  const drop = (1 - easeOutCubic(p)) * 36;
+  const bob = (p >= 1 && (Math.floor(t * 4) % 2) === 1) ? -1 : 0;
+  const sx = 224 - Math.round(Math.min(t, Math.max(0, D - 0.6)) * 1.1);
+  const sy = Math.round(46 - drop + bob);
+
+  const bw = size[0], bh = size[1];
+  buf.width = bw; buf.height = bh;
+  const bctx = buf.getContext("2d");
+  bctx.imageSmoothingEnabled = false;
+  bctx.clearRect(0, 0, bw, bh);
+  if (ready && sprite) bctx.drawImage(sprite, 0, 0);
+  const scanOp = clamp01((t - 3.1) / 0.25) * clamp01((5.5 - t) / 0.4);
+  if (ready && scanOp > 0.01) {
+    const sp = easeInOutCubic(clamp01((t - 3.1) / 1.8));
+    const by = Math.round(-12 + sp * (bh + 24));
+    const g = bctx.createLinearGradient(0, by - 7, 0, by + 7);
+    g.addColorStop(0, "rgba(56,189,248,0)");
+    g.addColorStop(0.5, `rgba(186,230,253,${(0.85 * scanOp).toFixed(3)})`);
+    g.addColorStop(1, "rgba(56,189,248,0)");
+    bctx.globalCompositeOperation = "source-atop";
+    bctx.fillStyle = g;
+    bctx.fillRect(0, by - 7, bw, 14);
+    bctx.globalCompositeOperation = "source-over";
+  }
+  if (ready && sprite) {
+    ctx.globalAlpha = clamp01(p * 1.6) * fadeOut;
+    if (shadow) ctx.drawImage(shadow, sx + 2, sy + 1);
+    ctx.drawImage(buf, sx, sy);
+    ctx.globalAlpha = 1;
+  }
+
+  // border + corner ticks
+  const bOp = easeOutCubic(clamp01((t - 0.1) / 0.4)) * fadeOut;
+  ctx.globalAlpha = bOp;
+  ctx.strokeStyle = C.border; ctx.lineWidth = 1;
+  ctx.strokeRect(0.5, 0.5, BASE_W - 1, BASE_H - 1);
+  px(2, 2, 6, 1, C.green); px(2, 2, 1, 6, C.green);
+  px(BASE_W - 8, BASE_H - 3, 6, 1, C.green); px(BASE_W - 3, BASE_H - 8, 1, 6, C.green);
+  ctx.globalAlpha = 1;
+
+  ctx.globalAlpha = bOp;
+  text(S.eyebrow || "PIXEL MODE", 14, 20, 7, C.dim);
+  ctx.globalAlpha = easeOutCubic(clamp01((t - 0.38) / 0.5)) * fadeOut;
+  text(S.title || "", 12, 30, 18, C.text, "500");
+  ctx.globalAlpha = fadeOut;
+  px(14, 55, Math.round(64 * easeOutCubic(clamp01((t - 0.6) / 0.6))), 1, accent);
+  ctx.globalAlpha = easeOutCubic(clamp01((t - 0.85) / 0.5)) * fadeOut;
+  text(S.subtitle || "", 14, 62, 8, C.dim);
+  if (S.cn) {
+    ctx.globalAlpha = easeOutCubic(clamp01((t - 1.0) / 0.5)) * fadeOut;
+    text(S.cn, 14, 78, 12, C.amber);
+  }
+
+  (S.rows || []).slice(0, 3).forEach((r, i) => {
+    const pr = clamp01((t - (1.2 + i * 0.16)) / 0.5);
+    ctx.globalAlpha = easeOutCubic(pr) * fadeOut;
+    const y = 104 + i * 15;
+    text(r.label || "", 14, y, 7, C.dim);
+    px(64, y + 2, 44, 3, "#20263c");
+    px(64, y + 2, Math.round(44 * (r.weight === undefined ? 1 : r.weight) * easeOutCubic(pr)), 3, r.color || C.cyan);
+    text(r.value || "", 116, y, 7, "#cbd8ea");
+  });
+
+  if (S.chapter) {
+    ctx.globalAlpha = bOp;
+    text(String(S.chapter.index).padStart(2, "0") + "/" + String(S.chapter.total).padStart(2, "0"),
+         250, 20, 7, C.dim2);
+  }
+  ctx.globalAlpha = easeOutCubic(clamp01((t - 1.7) / 0.5)) * fadeOut;
+  text(S.footer || "", 14, 164, 7, C.dim2);
+
+  // selection frame + label
+  const fp = clamp01((t - 4.3) / 0.8);
+  ctx.globalAlpha = easeOutCubic(fp) * fadeOut;
+  ctx.strokeStyle = C.cyan;
+  ctx.setLineDash([4, 3]);
+  ctx.lineDashOffset = -Math.round(t * 14);
+  ctx.strokeRect(216.5, 39.5, 82, 112);
+  ctx.setLineDash([]);
+  if (S.callout && S.callout.c1) {
+    ctx.globalAlpha = easeOutCubic(clamp01((t - 4.9) / 0.45)) * fadeOut;
+    const lw = Math.round(textWidth(S.callout.c1, 7)) + 8;
+    px(206, 24, lw, 11, "#171b2c");
+    ctx.strokeStyle = C.cyan; ctx.lineWidth = 1;
+    ctx.strokeRect(206.5, 24.5, lw - 1, 10);
+    text(S.callout.c1, 210, 27, 7, C.cyan);
+  }
+  ctx.globalAlpha = 1;
+
+  if (fadeIn < 1) { ctx.globalAlpha = 1 - fadeIn; px(0, 0, BASE_W, BASE_H, C.black); ctx.globalAlpha = 1; }
+  if (fadeOut < 1) { ctx.globalAlpha = 1 - fadeOut; px(0, 0, BASE_W, BASE_H, C.black); ctx.globalAlpha = 1; }
+};
+
+window.seek(0);
+</script>
+</body>
+</html>

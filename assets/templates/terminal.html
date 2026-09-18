@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #05070d; }
+  #stage { position: absolute; inset: 0; }
+  .mono { font-family: Consolas, "Cascadia Mono", Menlo, monospace; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+// terminal: a window that types itself. For technical explainers and code demos.
+const S = window.SCENE || {};
+const D = S.duration || 8;
+const stage = document.getElementById("stage");
+const accent = S.accent || "#4ade80";
+const COL = Object.assign({ bg: "#0a0f1a", panel: "#0d1420", text: "#dbe6f5", dim: "#5d6b83",
+  prompt: "#38bdf8", ok: "#4ade80", warn: "#fbbf24" }, S.colors || {});
+const clamp01 = (x) => Math.min(1, Math.max(0, x));
+const easeOutCubic = (x) => 1 - Math.pow(1 - x, 3);
+
+function hexA(hex, a) {
+  const h = hex.replace("#", "");
+  const n = parseInt(h.length === 3 ? h.split("").map(c => c + c).join("") : h, 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+
+const LINES = (S.lines || []).map((l) => (typeof l === "string" ? { text: l, kind: "cmd" } : l));
+
+let L = null;
+function build() {
+  const s = window.innerHeight / 720;
+  stage.innerHTML = "";
+  stage.style.background = `linear-gradient(160deg, #0b1120 0%, #05070d 70%)`;
+  const mk = (css, text) => {
+    const n = document.createElement("div");
+    Object.assign(n.style, css);
+    if (text !== undefined) n.textContent = text;
+    stage.appendChild(n);
+    return n;
+  };
+  const win = mk({ position: "absolute", left: `${96 * s}px`, top: `${96 * s}px`,
+    width: `${1088 * s}px`, height: `${528 * s}px`, background: hexA(COL.panel, 0.92),
+    borderRadius: `${10 * s}px`, border: `${1 * s}px solid ${hexA("#94a3b8", 0.18)}`,
+    overflow: "hidden", opacity: "0" });
+  mk({ position: "absolute", left: `${20 * s}px`, top: `${16 * s}px`, width: `${11 * s}px`,
+    height: `${11 * s}px`, borderRadius: "50%", background: "#ff5f57" });
+  mk({ position: "absolute", left: `${39 * s}px`, top: `${16 * s}px`, width: `${11 * s}px`,
+    height: `${11 * s}px`, borderRadius: "50%", background: "#febc2e" });
+  mk({ position: "absolute", left: `${58 * s}px`, top: `${16 * s}px`, width: `${11 * s}px`,
+    height: `${11 * s}px`, borderRadius: "50%", background: "#28c840" });
+  mk({ position: "absolute", left: `${88 * s}px`, right: "0", top: `${15 * s}px`,
+    fontSize: `${13 * s}px`, color: COL.dim }, S.windowTitle || "terminal");
+  const body = mk({ position: "absolute", left: `${26 * s}px`, right: `${26 * s}px`, top: `${52 * s}px`,
+    fontSize: `${(S.fontSize || 19) * s}px`, lineHeight: `${30 * s}px`, color: COL.text,
+    whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "Consolas, 'Cascadia Mono', monospace" });
+  const footer = mk({ position: "absolute", left: `${96 * s}px`, top: `${648 * s}px`, opacity: "0",
+    fontSize: `${12 * s}px`, letterSpacing: `${1 * s}px`, color: "#5d6b83" }, S.footer || "");
+  const title = mk({ position: "absolute", right: `${96 * s}px`, top: `${648 * s}px`, opacity: "0",
+    fontSize: `${12 * s}px`, color: accent }, S.title || "");
+  return { win, body, footer, title, s };
+}
+
+L = build();
+window.addEventListener("resize", () => { L = build(); });
+window.__sceneReady = true;
+
+function typed(t) {
+  // deterministic typing: characters appear at a constant rate, line by line
+  const cps = Number(S.charsPerSecond || 26);
+  let budget = Math.max(0, (t - 0.45)) * cps;
+  const out = [];
+  for (const line of LINES) {
+    const text = line.text || "";
+    if (budget <= 0) break;
+    const take = Math.min(text.length, Math.floor(budget));
+    out.push({ line, shown: text.slice(0, take), done: take >= text.length });
+    budget -= take + Number(line.pause ?? 6);
+  }
+  return out;
+}
+
+window.seek = (t) => {
+  const fadeOut = 1 - easeOutCubic(clamp01((t - (D - 0.5)) / 0.5));
+  L.win.style.opacity = (easeOutCubic(clamp01(t / 0.4)) * fadeOut).toFixed(4);
+  L.win.style.transform = `translateY(${((1 - easeOutCubic(clamp01(t / 0.5))) * 16 * L.s).toFixed(2)}px)`;
+  const rows = typed(t);
+  const parts = rows.map(({ line, shown, done }) => {
+    const color = line.kind === "out" ? COL.dim : line.kind === "ok" ? COL.ok :
+      line.kind === "warn" ? COL.warn : COL.text;
+    const head = line.kind === "cmd" ? `<span style="color:${COL.prompt}">${S.prompt || "$"} </span>` : "";
+    const caret = done ? "" : `<span style="opacity:${(Math.floor(t * 3) % 2 ? 0.15 : 1)}">&#9612;</span>`;
+    return `<div style="color:${color}">${head}${shown}${caret}</div>`;
+  });
+  L.body.innerHTML = parts.join("");
+  L.footer.style.opacity = (0.9 * easeOutCubic(clamp01((t - 0.7) / 0.5)) * fadeOut).toFixed(4);
+  L.title.style.opacity = (0.9 * easeOutCubic(clamp01((t - 0.8) / 0.5)) * fadeOut).toFixed(4);
+};
+
+window.seek(0);
+</script>
+</body>
+</html>

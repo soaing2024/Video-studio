@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #06080f; }
+  #stage { position: absolute; inset: 0; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<canvas id="fx" width="16" height="16"></canvas>
+<script>
+// kinetic: motion-graphics template. Coordinates are authored for 1280x720 and scaled by k.
+const S = window.SCENE || {};
+const A = S.assets || {};
+const D = S.duration || 8;
+const stage = document.getElementById("stage");
+const cv = document.getElementById("fx");
+const ctx = cv.getContext("2d");
+const W = () => window.innerWidth, H = () => window.innerHeight;
+let k = 1, subject = null, subjectReady = false;
+
+const clamp01 = (x) => Math.min(1, Math.max(0, x));
+const easeOutCubic = (x) => 1 - Math.pow(1 - x, 3);
+const easeInOutCubic = (x) => x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+const BACK_C1 = 1.70158, BACK_C3 = BACK_C1 + 1;
+const easeOutBack = (x) => 1 + BACK_C3 * Math.pow(x - 1, 3) + BACK_C1 * Math.pow(x - 1, 2);
+
+const accent = S.accent || "#e0455f";
+const bg = (S.colors && S.colors.bg) || "#0b1020";
+const ink = (S.colors && S.colors.text) || "#f8fafc";
+const dim = (S.colors && S.colors.dim) || "#93a3bd";
+
+function el(tag, css, text) {
+  const n = document.createElement(tag);
+  Object.assign(n.style, css);
+  if (text !== undefined) n.textContent = text;
+  stage.appendChild(n);
+  return n;
+}
+
+function build() {
+  k = H() / 720;
+  cv.width = W(); cv.height = H();
+  stage.style.background =
+    `radial-gradient(${70 * k}% ${90 * k}% at 78% 46%, ${hexA(accent, 0.20)} 0%, ${hexA(accent, 0)} 62%),` +
+    `radial-gradient(${90 * k}% ${80 * k}% at 6% 8%, rgba(56,189,248,0.14) 0%, rgba(56,189,248,0) 55%),` +
+    `linear-gradient(160deg, #101832 0%, #0a0e1d 52%, #06080f 100%)`;
+  stage.innerHTML = "";
+
+  const grid = el("div", { position: "absolute", inset: "0", opacity: "0",
+    backgroundImage: `radial-gradient(${hexA("#94a3b8", 0.15)} ${Math.max(1, k)}px, transparent ${Math.max(1, k)}px)`,
+    backgroundSize: `${40 * k}px ${40 * k}px` });
+  const halo = el("div", { position: "absolute", right: `${20 * k}px`, top: "0",
+    width: `${580 * k}px`, height: `${720 * k}px`, opacity: "0",
+    background: `radial-gradient(closest-side, ${hexA(accent, 0.42)}, ${hexA(accent, 0) } 72%)`, filter: `blur(${6 * k}px)` });
+  const box = el("div", { position: "absolute", right: `${110 * k}px`, top: `${60 * k}px`,
+    width: `${400 * k}px`, height: `${600 * k}px`, transformOrigin: "50% 100%", opacity: "0" });
+
+  const eyebrow = el("div", { position: "absolute", left: `${88 * k}px`, top: `${184 * k}px`, opacity: "0",
+    fontSize: `${12 * k}px`, letterSpacing: `${3 * k}px`, color: "#7f8ea8" }, S.eyebrow || "");
+  const title = el("div", { position: "absolute", left: `${86 * k}px`, top: `${208 * k}px`, opacity: "0",
+    fontSize: `${(S.titleSize || 58) * k}px`, fontWeight: "500", letterSpacing: `${k}px`, color: ink }, S.title || "");
+  const rule = el("div", { position: "absolute", left: `${88 * k}px`, top: `${302 * k}px`, width: "0",
+    height: `${3 * k}px`, background: accent, borderRadius: `${3 * k}px`,
+    boxShadow: `0 0 ${18 * k}px ${hexA(accent, 0.55)}` });
+  const sub = el("div", { position: "absolute", left: `${89 * k}px`, top: `${326 * k}px`, opacity: "0",
+    fontSize: `${15 * k}px`, letterSpacing: `${0.6 * k}px`, color: dim }, S.subtitle || "");
+
+  const rows = (S.rows || []).slice(0, 4).map((r, i) => {
+    const wrap = el("div", { position: "absolute", left: `${88 * k}px`, top: `${(410 + i * 56) * k}px`, opacity: "0" });
+    el("div", { fontSize: `${12 * k}px`, letterSpacing: `${2 * k}px`, color: "#8b9bb4" }, r.label || "");
+    const w = wrap.appendChild(document.createElement("div"));
+    w.style.fontSize = `${19 * k}px`; w.style.color = "#e8eef7"; w.style.marginTop = `${6 * k}px`;
+    w.textContent = r.value || "";
+    const track = wrap.appendChild(document.createElement("div"));
+    Object.assign(track.style, { position: "absolute", left: `${268 * k}px`, top: `${20 * k}px`,
+      width: `${196 * k}px`, height: `${4 * k}px`, background: hexA("#94a3b8", 0.18),
+      borderRadius: `${3 * k}px`, overflow: "hidden" });
+    const fill = track.appendChild(document.createElement("div"));
+    Object.assign(fill.style, { height: "100%", width: "0", borderRadius: `${3 * k}px`,
+      background: r.color || accent });
+    return { wrap, fill, weight: r.weight === undefined ? 1 : r.weight };
+  });
+
+  const callout = el("div", { position: "absolute", left: `${88 * k}px`, top: `${612 * k}px`, opacity: "0",
+    paddingLeft: `${14 * k}px`, borderLeft: `${2 * k}px solid #7dd3fc` });
+  el("div", { fontSize: `${13 * k}px`, color: "#cbd8ea" }, (S.callout && S.callout.c1) || "");
+  el("div", { fontSize: `${12 * k}px`, color: "#7f8ea8", marginTop: `${5 * k}px` }, (S.callout && S.callout.c2) || "");
+
+  const footer = el("div", { position: "absolute", left: `${88 * k}px`, top: `${678 * k}px`, opacity: "0",
+    fontSize: `${12 * k}px`, color: "#5d6b83" }, S.footer || "");
+
+  const frame = el("div", { position: "absolute", inset: "0", opacity: "0" });
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 1280 720");
+  svg.style.cssText = "position:absolute;inset:0;width:100%;height:100%";
+  const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+  rect.setAttribute("x", "762"); rect.setAttribute("y", "52");
+  rect.setAttribute("width", "416"); rect.setAttribute("height", "616");
+  rect.setAttribute("rx", "20"); rect.setAttribute("fill", "none");
+  rect.setAttribute("stroke", "#7dd3fc"); rect.setAttribute("stroke-width", "2");
+  rect.setAttribute("stroke-dasharray", "2064"); rect.setAttribute("stroke-dashoffset", "2064");
+  svg.appendChild(rect); frame.appendChild(svg);
+
+  return { grid, halo, box, eyebrow, title, rule, sub, rows, callout, footer, frame, rect };
+}
+
+function hexA(hex, a) {
+  const h = hex.replace("#", "");
+  const n = parseInt(h.length === 3 ? h.split("").map(c => c + c).join("") : h, 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+
+let L = build();
+window.addEventListener("resize", () => { L = build(); });
+
+if (A.subject) {
+  subject = new Image();
+  subject.onload = () => { subjectReady = true; window.__sceneReady = true; };
+  subject.onerror = () => { subjectReady = true; window.__sceneReady = true; };
+  subject.src = A.subject;
+} else {
+  window.__sceneReady = true;
+}
+
+window.seek = (t) => {
+  const fadeOut = 1 - easeOutCubic(clamp01((t - (D - 0.55)) / 0.55));
+  L.grid.style.opacity = (0.55 * easeOutCubic(clamp01(t / 0.7)) * fadeOut).toFixed(4);
+
+  const pe = clamp01((t - 1.9) / 0.85);
+  const kb = clamp01((t - 2.6) / Math.max(0.1, D - 0.55 - 2.6));
+  const ty = (1 - easeOutCubic(pe)) * 120 - 10 * kb;
+  const sc = (0.92 + 0.08 * easeOutBack(pe)) * (1 + 0.055 * kb);
+  L.box.style.opacity = (clamp01(pe * 1.4) * fadeOut).toFixed(4);
+  L.box.style.transform = `translate3d(${(-14 * kb).toFixed(2)}px, ${ty.toFixed(2)}px, 0) scale(${sc.toFixed(4)})`;
+  L.halo.style.opacity = (0.85 * easeOutCubic(clamp01((t - 2.25) / 1.0)) * fadeOut).toFixed(4);
+
+  const pT = clamp01((t - 0.35) / 0.65);
+  L.eyebrow.style.opacity = (easeOutCubic(clamp01((t - 0.25) / 0.5)) * fadeOut).toFixed(4);
+  L.title.style.opacity = (easeOutCubic(pT) * fadeOut).toFixed(4);
+  L.title.style.transform = `translateY(${((1 - easeOutCubic(pT)) * 30).toFixed(2)}px)`;
+  L.rule.style.width = `${(196 * k * easeOutCubic(clamp01((t - 0.55) / 0.8))).toFixed(2)}px`;
+  L.sub.style.opacity = (easeOutCubic(clamp01((t - 0.85) / 0.55)) * fadeOut).toFixed(4);
+  L.footer.style.opacity = (0.95 * easeOutCubic(clamp01((t - 1.6) / 0.6)) * fadeOut).toFixed(4);
+
+  L.rows.forEach((row, i) => {
+    const p = clamp01((t - (1.05 + i * 0.2)) / 0.6);
+    row.wrap.style.opacity = (easeOutCubic(p) * fadeOut).toFixed(4);
+    row.fill.style.width = `${(100 * row.weight * easeOutCubic(p)).toFixed(2)}%`;
+  });
+
+  const calloutOn = (S.callout && (S.callout.c1 || S.callout.c2)) ? 1 : 0;
+  L.callout.style.opacity = (calloutOn * easeOutCubic(clamp01((t - 4.7) / 0.55)) * fadeOut).toFixed(4);
+
+  const fp = clamp01((t - 4.3) / 1.0);
+  L.frame.style.opacity = (0.85 * easeOutCubic(fp) * fadeOut).toFixed(4);
+  L.rect.setAttribute("stroke-dashoffset", (2064 * (1 - easeOutCubic(fp))).toFixed(1));
+
+  // subject + silhouette-masked scan band, composited in canvas
+  const bw = Math.round(400 * k), bh = Math.round(600 * k);
+  if (cv.width !== W() || cv.height !== H()) { cv.width = W(); cv.height = H(); }
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  const scanOp = clamp01((t - 3.1) / 0.3) * clamp01((5.3 - t) / 0.5);
+  if (subjectReady && subject) {
+    const x = Math.round(W() - 110 * k - bw), y = Math.round(60 * k);
+    ctx.save();
+    ctx.globalAlpha = clamp01(pe * 1.4) * fadeOut;
+    ctx.translate(x + bw / 2, y + bh);
+    ctx.scale(sc, sc);
+    ctx.drawImage(subject, -bw / 2, -bh + ty, bw, bh);
+    if (scanOp > 0.01) {
+      const pS = easeInOutCubic(clamp01((t - 3.15) / 1.7));
+      const by = -bh + pS * (bh + 40 * k);
+      const grad = ctx.createLinearGradient(0, by - 40 * k, 0, by + 40 * k);
+      grad.addColorStop(0, "rgba(125,211,252,0)");
+      grad.addColorStop(0.5, `rgba(255,255,255,${(0.55 * scanOp).toFixed(3)})`);
+      grad.addColorStop(1, "rgba(125,211,252,0)");
+      ctx.globalCompositeOperation = "source-atop";
+      ctx.fillStyle = grad;
+      ctx.fillRect(-bw / 2, by, bw, 80 * k);
+      ctx.globalCompositeOperation = "source-over";
+    }
+    ctx.restore();
+  }
+};
+
+window.seek(0);
+</script>
+</body>
+</html>

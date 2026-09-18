@@ -1,0 +1,68 @@
+{
+  "//": "Colour presets for templates. Pass one through look.accent + template colours.",
+  "default": {
+    "accent": "#e0455f",
+    "bg": "#0b1020",
+    "text": "#f8fafc",
+    "dim": "#93a3bd"
+  },
+  "midnight": {
+    "accent": "#38bdf8",
+    "bg": "#070b16",
+    "text": "#e6edf7",
+    "dim": "#8296b4"
+  },
+  "ember": {
+    "accent": "#f97316",
+    "bg": "#120b08",
+    "text": "#fdf6ef",
+    "dim": "#b39a86"
+  },
+  "pixel16": {
+    "accent": "#e0455f",
+    "bg": "#0f1220",
+    "bg2": "#171b2c",
+    "border": "#2b3350",
+    "text": "#e8eef7",
+    "dim": "#8b9bb4",
+    "dim2": "#5d6b83",
+    "red": "#e0455f",
+    "cyan": "#38bdf8",
+    "green": "#4ade80",
+    "amber": "#fbbf24",
+    "purple": "#a78bfa",
+    "black": "#05070d"
+  },
+  "gameboy": {
+    "//": "Four shades only - pair with look.pixelate.colors = 4",
+    "accent": "#8bac0f",
+    "bg": "#0f380f",
+    "bg2": "#306230",
+    "border": "#8bac0f",
+    "text": "#9bbc0f",
+    "dim": "#306230",
+    "dim2": "#0f380f",
+    "red": "#8bac0f",
+    "cyan": "#9bbc0f",
+    "green": "#9bbc0f",
+    "amber": "#8bac0f",
+    "purple": "#8bac0f",
+    "black": "#0f380f"
+  },
+  "mono": {
+    "//": "One-bit paper look - pair with look.pixelate.colors = 2 and dither = bayer",
+    "accent": "#1a1a1a",
+    "bg": "#f4f1ea",
+    "bg2": "#e4e0d6",
+    "border": "#1a1a1a",
+    "text": "#121212",
+    "dim": "#5a5a5a",
+    "dim2": "#8a8a8a",
+    "red": "#1a1a1a",
+    "cyan": "#3a3a3a",
+    "green": "#2a2a2a",
+    "amber": "#4a4a4a",
+    "purple": "#333333",
+    "black": "#000000"
+  }
+}
