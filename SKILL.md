@@ -1,15 +1,42 @@
 ---
 name: video-studio
-description: Produce finished videos from code and source assets - motion-graphics clips, explainers, 5-minute long-form, high-energy montages, pixel-art. Renders frame-exact scenes in headless Chromium, assembles them with ffmpeg, and verifies the result by measurement. Use when the user wants a video created, restyled, or pipelined from a spec; not for hand-editing footage in a GUI editor.
+description: Produce finished videos from code and source assets - motion-graphics clips, explainers, 5-minute long-form, high-energy montages, pixel-art. Renders frame-exact scenes in headless Chromium, assembles them with ffmpeg, and verifies the result by measurement. Interview-first: it plans with the user, waits for explicit approval of the full plan, then writes once and renders once, previewing a still only when a specific doubt requires it. Use when the user wants a video created, restyled, or pipelined from a spec; not for hand-editing footage in a GUI editor.
 ---
 
 # Video Studio
 
 Turn a project spec into a rendered, edited, verified video file.
 
+## Three rules before anything else
+
+**1. Talk first - never create on the first turn.** A request is a starting point, not a brief.
+Interview the user over as many rounds as it takes before any narration, scene, spec or asset is
+written: who it is for, where it plays, how long, what the viewer must think or do afterwards, the
+tone (and what it must not be), whether there is narration, music, existing footage or a brand
+look, and which references the user likes or rejects. A few focused questions per round; after each
+round, restate what is settled and what is still open. Then present the **complete plan for
+approval** - the script, the full storyboard (per beat: act, intent, spoken line, on-screen text,
+visual device, duration, handoffs), the visual direction, the audio plan, the asset list and the
+acceptance checklist. Stop there and wait for an explicit yes. Do not scaffold, compile, generate
+images or render before that approval, and re-confirm after any change the user asks for.
+
+**2. One write, one render, one export.** Once the plan is approved, the spec is written once, the
+piece is rendered once, and that render is the delivered file. Design is settled in the plan, on
+paper. A full `run` is the delivery step, not an exploration step: no "render it and see", no
+repeated full renders to compare options, no rendering a piece whose plan is still moving. If
+something is wrong after delivery, agree on the fix, revise the spec, and deliver one new round -
+rendering is not the iteration loop.
+
+**3. Preview only when necessary.** `preview` is an exception, not the design loop. Do not sweep a
+still per beat "to check how it looks". Reason the still frame out on paper from the plan. Only a
+specific, stateable doubt that paper cannot settle - asset loading, font fallback, whether a
+composition holds at the real aspect - justifies rendering that one frame, and you should be able
+to say which doubt it answers. A preview is not a render, but previewing every beat is the old
+iterate-by-looking loop under a cheaper name.
+
 ## First move
 
-Check the environment before anything else:
+Check the environment before any render or asset work (this can run while you interview the user):
 
 ```bash
 python <skill-dir>/scripts/vs.py doctor --install-ffmpeg
@@ -20,6 +47,9 @@ ffmpeg that can only encode VP8/PNG, so a build found on PATH may be silently us
 verifies `libx264` on purpose. Report anything `doctor` flags instead of working around it.
 
 ## Pipeline
+
+Nothing in this list starts before the interview and the approved plan above. The plan is the gate:
+no spec, scene, generated image or render until the user has said yes to it.
 
 For anything bigger than one idea, start a step earlier: write the narration, run `brief` to lay
 out acts, per-beat intent, on-screen text, visual devices and image prompts, then `compile` it
@@ -32,7 +62,8 @@ render time is spent.
    `python scripts/beat_audit.py project.json` fails on exit-then-enter gaps, over-long moves and
    weak overlaps - the three causes of a slide-deck feel
    ([references/rhythm-handoff.md](references/rhythm-handoff.md)).
-4. `preview` a still frame per segment while iterating on design - seconds per look, not minutes.
+4. `preview` only when a specific doubt cannot be settled on paper: one targeted frame that answers
+   it, never a per-beat sweep. The default is to judge the still frame from the plan.
 5. `run`: render each segment straight into a cached clip, assemble with ffmpeg, verify by
    measurement. Frames are piped into ffmpeg's stdin; no PNG sequence ever hits disk.
 
@@ -50,7 +81,7 @@ render time is spent.
 | `sprite <image> [--width 64 --height 96 --colors 12]` | image to pixel-art sprite plus shadow |
 | `beats <audio> [--cuts 60]` | beat times and montage cut points |
 | `init <dir> [--duration N]` | scaffold one take: a spec plus the scene to write |
-| `preview <project> [--segment id] [--at 2.0]` | one still frame, fast design loop |
+| `preview <project> [--segment id] [--at 2.0]` | one still frame, only for a doubt paper cannot settle |
 | `render <project> [--jobs N] [--force]` | render segments only (cached) |
 | `assemble <project> [--out f.mp4]` | cut, transition, mix, encode only |
 | `verify <project>` | measured acceptance report |
@@ -118,6 +149,12 @@ pass, and the list of skeletons that are already used up:
 
 ## Rules that keep output correct
 
+- **Talk first, get the plan approved, then create.** No spec, scene, image or render before the
+  user has approved the full plan (script + storyboard + visual direction + audio + checklist).
+- **One write, one render, one export.** The approved spec is written once; the full render happens
+  once and its output is the deliverable. Iterate on paper, never by re-rendering the piece.
+- **Preview only when necessary.** No per-beat still sweep as a design loop. One targeted `preview`
+  frame is allowed when a specific doubt cannot be resolved from the plan.
 - **One take, no cuts.** A project is one scene and one duration; the whole piece runs from t=0 to
   the end without a single cut. Change of scene is a transformation inside the shot, not an edit.
   Declare genuinely static stretches as `hold` windows - the renderer reuses one frame for them, and

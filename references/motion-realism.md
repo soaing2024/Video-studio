@@ -160,6 +160,6 @@ breathing light, drift in two axes at incommensurate periods, warm off-white can
 ## 8. Changing one shot later
 
 Ask for the beat, not the file: name the second-range and the intent ("换第 3 拍：让列扫描的
-带子在转轴后先停 0.3s 再走"). Then patch only that block of the scene and re-`preview` a single
-stamp. A re-render is not needed while only the scene changes if the segment cache key is
-invalidated correctly — but re-check one still before spending the render.
+带子在转轴后先停 0.3s 再走"). Then patch only that block of the scene. Only if a specific doubt
+remains, `preview` that one frame; a full re-render is not needed while only the scene changes if
+the segment cache key is invalidated correctly.

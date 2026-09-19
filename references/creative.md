@@ -5,7 +5,16 @@ rendering, and visuals that need to be made rather than found.
 
 ## 1. Plan first, render second
 
-`brief` produces a complete, editable design document. Nothing renders until it is complete.
+Planning happens with the user, not at them. Before `brief` runs, interview the user over as many
+rounds as the piece needs - audience, platform, length, intent, tone, narration, music, existing
+footage, brand, references - then present the **complete plan for approval**: script, full
+storyboard (act, intent, spoken line, on-screen text, visual device, duration, handoffs per beat),
+visual direction, audio plan, asset list and acceptance checklist. The user's explicit yes is the
+gate; before it, nothing is scaffolded, compiled, generated or rendered, and any change the user
+asks for means revising the plan and confirming again.
+
+`brief` then produces that complete, editable design document as a file. Nothing renders until it
+is complete *and* approved.
 
 ```bash
 python vs.py brief --script script.txt --out brief.json \
@@ -33,6 +42,12 @@ python vs.py compile brief.json --out project.json
 python vs.py plan project.json      # budget: cache hits, frames, estimated minutes, style report
 python vs.py run project.json
 ```
+
+`run` here is the delivery step, not a way to look at options: the approved plan is written once, the
+piece is rendered once, and that export is the finished file. Compare directions on paper; `preview`
+is only for a specific doubt that paper cannot settle, never a per-beat sweep. If something needs to
+change after delivery, revise the plan, re-confirm it with the user, and deliver one new round rather
+than rendering the piece again to see what happens.
 
 `compile` maps beats onto the template vocabulary (equivalently: `hook` becomes a title or a big
 number, `body` becomes a caption panel or a chart, `turn` becomes a quote card), wires the narration
