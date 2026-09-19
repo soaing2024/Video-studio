@@ -1,5 +1,5 @@
 interface:
   display_name: "Video Studio"
-  short_description: "Code-driven video: render, edit, verify end to end"
+  short_description: "Code-driven video: render, assemble, verify end to end"
   brand_color: "#E0455F"
   default_prompt: "Use $video-studio to turn my assets and idea into a finished video. Interview me first, show me the full plan for approval, then write once and render once."

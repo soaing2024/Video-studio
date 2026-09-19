@@ -38,6 +38,11 @@ fps into a 16-char key, stored next to the clip as `.key`. A matching key means 
 Measured effect: after the first run of the 3-segment demo, a full `run` took ~3 seconds because
 only assembly and verification re-executed.
 
+With `--slices N` a single take is cut into N time ranges, each with its own cache key. A cheap
+downscaled signature pass records which frames actually changed, so a re-run renders only the
+slices whose states changed; a crash re-renders only the missing slices, and the join verifies the
+total frame count before the take is accepted.
+
 `--force` ignores the cache. Use it after changing anything the key cannot see (for example, a file
 edited in place within the same second).
 
@@ -47,7 +52,7 @@ One ffmpeg invocation per project. A single-take project feeds the fold a single
 concat/xfade do nothing and the filter graph is just the look chain; the fold exists for the
 montage path (many `source` clips) and for multi-shot projects.
 
-One ffmpeg invocation per project. The filter graph is written to `build/<name>/filter.txt` and
+The filter graph is written to `build/<name>/filter.txt` and
 passed via `-/filter_complex` (falling back to `-filter_complex_script` on older builds).
 
 **Per input:** `trim=start=a:end=b, setpts=PTS-STARTPTS, fps=F, setsar=1`, plus
@@ -111,20 +116,22 @@ requested size and measures the error instead.
 
 ## 8. Measured throughput
 
-Rendering is dominated by the screenshot round-trip, not by drawing.
+Rendering is dominated by the screenshot round-trip, not by drawing. The numbers below are the
+measured 3840×2160 baseline from the audit that produced the current renderer (see AUDIT.md §6);
+lower resolutions scale roughly with pixel count, and `vs.py plan` prints the figure for the
+machine you are actually on.
 
-| work size | per frame, 1 job | 5-minute video, 30 fps |
-| --- | --- | --- |
-| 1920×1080 | ~384 ms | ~58 min (≈20 min at `jobs: 3`) |
-| 1280×720 | ~180 ms | ~27 min (≈10 min at `jobs: 3`) |
-| 320×180 (pixel, scale 4) | ~25 ms at `jobs: 3` | ~4 min |
-| held shot (`"still": true`) | one frame regardless of duration | seconds |
+| configuration | ms/frame | lossless | 1800 frames, one job |
+| --- | --- | --- | --- |
+| Playwright PNG, software raster (old default) | 730 | yes | ~22 min |
+| + GPU rasterisation | 671 | yes | ~20 min |
+| + CDP `optimizeForSpeed` PNG (current default) | 166 | yes | ~5 min |
+| + JPEG q97 (preview only) | 102 | no | ~3 min |
+| `hold` window | 1 frame per window, whatever its length | yes | seconds |
 
-A 60-second 1080p held segment measured 14 s end-to-end including assembly and verification.
-
-Ways to buy speed, in order of payoff: held shots for static sections → pixel look or lower
-resolution → `fps: 24` for long-form → more `jobs` (diminishing returns past core count) → cached
-segments for re-runs.
+Ways to buy speed, in order of payoff: `hold` windows for static sections → pixel look or lower
+resolution → `fps: 24` for long-form → `--slices N` for parallel rendering of a single take
+(diminishing returns past core count) → cached slices for re-runs.
 
 ## 9. Failure modes already hit
 
@@ -165,7 +172,7 @@ segments for re-runs.
 ## 10. Extending it
 
 - **New scene:** write one (`vs.py init --duration N` scaffolds one), keep the `seek(t)` contract and the
-  `window.SCENE` input, pass its path as `"template"` in a segment.
+  `window.SCENE` input, and point the project's `"scene"` at it.
 - **New look:** add a filter to the tail chain in `assemble.py`. Anything ffmpeg can express is
   available; keep it deterministic and duration-aware.
 - **New quality gate:** add a measurement to `verify.py` and check the actual invariant, not the
