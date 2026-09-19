@@ -1,0 +1,20 @@
+{
+  "name": "lottie",
+  "package": "lottie-web",
+  "version": "5.13.0",
+  "license": "MIT",
+  "kind": "motion",
+  "global": "lottie",
+  "provides": "After Effects / Bodymovin JSON playback (SVG renderer, light build)",
+  "drive": "animation.goToAndStop(t * fps, true) - never play()",
+  "entry": "lottie_light.min.js",
+  "files": {
+    "lottie_light.min.js": {
+      "from": "build/player/lottie_light.min.js",
+      "sha256": "9588432bec30c8ef8200bac4a67d8aaad881047bc2a6c9fa624d90ec96402410",
+      "bytes": 168394
+    }
+  },
+  "source": "https://www.npmjs.com/package/lottie-web/v/5.13.0",
+  "note": "Vendored build-time with `vs.py libs --install`. Renders never fetch this."
+}

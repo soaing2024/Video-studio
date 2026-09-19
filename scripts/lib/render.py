@@ -13,7 +13,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from . import imagegen, runtime, spec as specmod
+from . import imagegen, libs, runtime, spec as specmod
 from .sprite import make_sprite
 
 # The only scene the skill ships: plumbing, no design. `vs.py init` copies it as a starting file.
@@ -46,10 +46,25 @@ def hold_args(seg: dict) -> list[str]:
     return ["--hold", ",".join(f"{float(a):.3f}-{float(b):.3f}" for a, b in holds)]
 
 
-def runtime_args() -> list[str]:
-    """The pure-function runtimes every scene gets injected with, in load order."""
+RUNTIME_FILES = ("scene.js", "anim.js", "kit.js")
+
+
+def libs_for(spec: dict, seg: dict | None = None) -> list[Path]:
+    """Vendored libraries this project (and this segment) opted into, in load order."""
+    return libs.resolve(list(spec.get("libs") or []) + list((seg or {}).get("libs") or []))
+
+
+def runtime_args(spec: dict | None = None, seg: dict | None = None) -> list[str]:
+    """The pure-function runtimes every scene gets injected with, in load order.
+
+    Vendored libraries ride the same path: Playwright's addInitScript reads the file from disk
+    and evaluates it in the page before any scene script runs, so a `<script src>` - and the
+    relative path it would need - never appears in a scene."""
     rt = runtime.SKILL_DIR / "assets" / "runtime"
-    return ["--runtimes", ",".join(str(rt / n) for n in ("scene.js", "anim.js", "kit.js"))]
+    files = [str(rt / n) for n in RUNTIME_FILES]
+    if spec is not None:
+        files += [str(p) for p in libs_for(spec, seg)]
+    return ["--runtimes", ",".join(files)]
 
 
 def build_dir(spec: dict) -> Path:
@@ -75,6 +90,8 @@ def _key(spec: dict, seg: dict, w: int, h: int) -> str:
             hsh.update(f"{st.st_size}:{int(st.st_mtime)}".encode())
     hsh.update(f"{w}x{h}@{spec['video']['fps']}:{float(seg['duration'])}".encode())
     hsh.update(json.dumps(seg.get("hold") or [], sort_keys=True).encode())
+    # A vendored library is part of the picture: upgrading it must invalidate the cache.
+    hsh.update(libs.fingerprint(list(spec.get("libs") or []) + list(seg.get("libs") or [])).encode())
     return hsh.hexdigest()[:16]
 
 
@@ -94,9 +111,19 @@ def prepare_assets(spec: dict, seg: dict, log=print) -> dict:
         if isinstance(value, dict) and value.get("prompt"):
             made = imagegen.resolve_prompt(spec, seg["id"], name, value, log=log)
             assets[name] = made
-        # Opt-in by data, not by picking a template: a scene that wants a sprite says so.
-        if ("sprite" not in assets) and "subject" in assets and isinstance(data.get("sprite"), dict):
-            cfg = data["sprite"]
+        # A .json asset is data, not a URL: lottie needs the parsed animation, and a file://
+        # XHR would be blocked anyway. Anything else stays a file URL the scene can load.
+        if isinstance(value, str) and Path(value).suffix.lower() == ".json" and Path(value).is_file():
+            try:
+                assets[name] = json.loads(Path(value).read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as e:
+                raise RuntimeError(f"asset '{name}' is not valid JSON: {e}") from e
+
+    # Sprites are opt-in by data, not by picking a template: a scene that wants one says so.
+    # (This block used to sit inside the loop, unguarded: any shot whose assets had no `subject`
+    # - a JSON animation, say - died with a KeyError before it rendered.)
+    if "sprite" not in assets and "subject" in assets and isinstance(data.get("sprite"), dict):
+        cfg = data["sprite"]
         out = build_dir(spec) / "sprites" / f"{seg['id']}.png"
         report = make_sprite(
             assets["subject"], str(out),
@@ -108,7 +135,7 @@ def prepare_assets(spec: dict, seg: dict, log=print) -> dict:
         data.setdefault("spriteSize", report["size"])
 
     payload = dict(data)
-    payload["assets"] = {k: _file_url(v) for k, v in assets.items()}
+    payload["assets"] = {k: (_file_url(v) if isinstance(v, str) else v) for k, v in assets.items()}
     payload["duration"] = float(seg["duration"])
     payload["id"] = seg["id"]
     payload.setdefault("accent", (spec.get("look") or {}).get("accent", "#e0455f"))
@@ -147,7 +174,7 @@ def render_segment(spec: dict, seg: dict, ffmpeg: str, node: str, force: bool = 
            "--scene", str(tpl), "--out", str(out), "--data", str(data_file),
            "--fps", str(spec["video"]["fps"]), "--duration", str(seg["duration"]),
            "--width", str(w), "--height", str(h), "--ffmpeg", ffmpeg,
-           "--crf", str((spec.get("render") or {}).get("crf", 12))] + hold_args(seg) + runtime_args()
+           "--crf", str((spec.get("render") or {}).get("crf", 12))] + hold_args(seg) + runtime_args(spec, seg)
     env = runtime_env()
     proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
                           errors="replace", env=env)
@@ -172,7 +199,7 @@ def _render_still_segment(spec: dict, seg: dict, ffmpeg: str, node: str, out: Pa
            "--scene", str(tpl), "--out", str(out), "--data", str(data_file),
            "--fps", str(spec["video"]["fps"]), "--duration", str(seg["duration"]),
            "--width", str(w), "--height", str(h), "--ffmpeg", ffmpeg,
-           "--still", str(round(at, 3)), "--still-out", str(still)] + runtime_args()
+           "--still", str(round(at, 3)), "--still-out", str(still)] + runtime_args(spec, seg)
     proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
                           errors="replace", env=runtime_env())
     if proc.returncode != 0:

@@ -267,6 +267,7 @@ X_FADE_TYPES = {
 def validate(spec: dict) -> list[dict]:
     """Static problems worth reporting before a render is attempted."""
     from . import render as render_mod  # local import avoids a cycle
+    from . import libs as libs_mod
 
     issues: list[dict] = []
 
@@ -275,6 +276,10 @@ def validate(spec: dict) -> list[dict]:
 
     for seg in spec["segments"]:
         scene = render_mod.scene_path(seg)
+        try:      # a project, or one shot in it, may opt into a vendored library
+            render_mod.libs_for(spec, seg)
+        except libs_mod.LibError as e:
+            add("error", seg["id"], str(e))
         if not scene.is_file():
             add("error", seg["id"], f"scene not found: {scene}")
         if spec.get("single_take") and (seg.get("data") or {}).get("still"):

@@ -81,6 +81,7 @@ render time is spent.
 | `sprite <image> [--width 64 --height 96 --colors 12]` | image to pixel-art sprite plus shadow |
 | `beats <audio> [--cuts 60]` | beat times and montage cut points |
 | `init <dir> [--duration N]` | scaffold one take: a spec plus the scene to write |
+| `libs [--install name...]` | list vendored browser libraries, or vendor one from npm (build-time only) |
 | `preview <project> [--segment id] [--at 2.0]` | one still frame, only for a doubt paper cannot settle |
 | `render <project> [--jobs N] [--force]` | render segments only (cached) |
 | `assemble <project> [--out f.mp4]` | cut, transition, mix, encode only |
@@ -106,6 +107,7 @@ turn.
   },
   "duration": 24.0,
   "scene": "scenes/take.html",
+  "libs": ["lucide", "lottie"],       // vendored browser libraries this shot may use
   "hold": [[6.0, 11.0]],              // seconds where the picture genuinely does not change
   "data": { "title": "...", "caption": "..." },
   "audio": {
@@ -139,6 +141,25 @@ and `hold` windows (the take-level equivalent of a held shot).
 
 Assets: `subject` (any image), `sprite` plus `spriteShadow` (a pre-made pair - make one with
 `vs.py sprite`), `background`. Anything else you need, pass it as data and read it in the scene.
+
+### Vendored libraries
+
+`"libs": ["lucide"]` injects a browser library into the page through the same mechanism as
+`Scene` / `Anim` / `Kit` - Playwright's init script, read from `assets/lib/` - so a scene never
+carries a `<script src>` and never reaches the network. `vs.py libs` lists what is vendored and
+what could be; `vs.py libs --install <name>` vendors one from npm at build time.
+
+- `lucide` (ISC, 2108 icons) - `Scene.icon("arrow-right", {size, color, strokeWidth})` and
+  `Scene.iconNames()`. Icons are DOM, so there is no font fallback and no network.
+- `lottie` (MIT) - `Anim.lottie(host, data, {fps}).seek(t)`. Point a `.json` asset at the
+  Bodymovin export and it arrives parsed in `SCENE.assets` (a `file://` XHR would be blocked).
+- `anime` (MIT) - `Anim.timeline(seconds, build).seek(t)`, with the engine's autoplay and ticker
+  left off.
+
+Both motion wrappers exist to keep the one hard rule intact: the library is built once, then told
+where to stand on every frame. Nothing starts a clock, so the same `t` still gives the same
+frame. Reach for one only when the effect cannot be written directly as a function of `t`
+([references/libraries.md](references/libraries.md)).
 
 **There are no built-in templates.** The skeletons were deleted on purpose: every shot is a scene
 you write for this video, pointed at by `scene`. The renderer injects `Scene` / `Anim` / `Kit`, so
@@ -204,7 +225,7 @@ pass, and the list of skeletons that are already used up:
 - Craft, from the animation/design tutorial canon - the twelve animation principles, the four
   presentation-design principles, composition and type-scale numbers, each turned into a
   checkable rule with its source: [references/craft.md](references/craft.md). Written in Chinese.
-- Libraries worth reaching for - motion, footage, sound - with the licence and access rules for
+- Libraries worth reaching for - icons, motion, footage, sound - with the licence and access rules for
   each, and why anything external has to be vendored before a render:
   [references/libraries.md](references/libraries.md). Written in Chinese.
 - Advanced technique prompts - colour scales (chroma.js and friends), external motion libraries

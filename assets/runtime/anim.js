@@ -222,5 +222,58 @@
     }
   }
 
-  global.Anim = { Actor, Scene, EASE, spring, clamp01, mixColor };
+  /* --- vendored motion libraries ----------------------------------------------------------
+   * Both wrappers exist for one reason: those libraries own a clock, and a scene must not.
+   * Each is created once with autoplay off, then seeked to t on every frame, so nothing starts
+   * a ticker and the same t always gives the same frame. Opt in with
+   * `"libs": ["anime"]` or `"libs": ["lottie"]` in project.json. */
+
+  /* anime.js: build the timeline once, then drive it by the second. */
+  function timeline(durationSeconds, build, opts) {
+    const anime = global.anime;
+    if (!anime || typeof anime.createTimeline !== "function") {
+      throw new Error('Anim.timeline needs anime.js: add "libs": ["anime"] to project.json, then run: python vs.py libs --install anime');
+    }
+    const tl = anime.createTimeline(Object.assign({ autoplay: false }, opts || {}));
+    if (build) build(tl, anime);
+    const raw = (tl.duration || 0) / 1000;      // anime counts in milliseconds
+    const span = durationSeconds || raw || 1;
+    return {
+      timeline: tl,
+      duration: span,
+      rawDuration: raw,
+      seek(t) { tl.seek(Math.min(span, Math.max(0, t)) * 1000); }
+    };
+  }
+
+  /* lottie-web: one playback head, moved to a frame and stopped there. */
+  function lottie(container, animationData, opts) {
+    const o = opts || {};
+    const lib = global.lottie;
+    if (!lib || typeof lib.loadAnimation !== "function") {
+      throw new Error('Anim.lottie needs lottie-web: add "libs": ["lottie"] to project.json, then run: python vs.py libs --install lottie');
+    }
+    if (!animationData) {
+      throw new Error("Anim.lottie needs animationData - point a .json asset at the Bodymovin export; it arrives parsed in SCENE.assets");
+    }
+    const anim = lib.loadAnimation({
+      container,
+      renderer: o.renderer || "svg",
+      loop: false,
+      autoplay: false,
+      animationData,
+      rendererSettings: { preserveAspectRatio: o.fit || "xMidYMid meet", progressiveLoad: false }
+    });
+    const fps = o.fps || animationData.fr || 30;
+    const span = o.duration || (animationData.op ? (animationData.op - (animationData.ip || 0)) / fps : 0);
+    return {
+      animation: anim,
+      fps,
+      duration: span,
+      seek(t) { anim.goToAndStop(Math.max(0, t * fps), true); },
+      destroy() { anim.destroy(); }
+    };
+  }
+
+  global.Anim = { Actor, Scene, EASE, spring, clamp01, mixColor, timeline, lottie };
 })(window);

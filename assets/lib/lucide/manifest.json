@@ -1,0 +1,20 @@
+{
+  "name": "lucide",
+  "package": "lucide",
+  "version": "1.47.0",
+  "license": "ISC",
+  "kind": "icons",
+  "global": "lucide",
+  "provides": "2108 stroke icons as SVG node data; drives Scene.icon()",
+  "drive": "build the <svg> once, then animate it with any t-derived transform",
+  "entry": "lucide.min.js",
+  "files": {
+    "lucide.min.js": {
+      "from": "dist/umd/lucide.min.js",
+      "sha256": "c3291ea757ff3da0fc45a41d3ff60d61da9b257314962c5cdded94ca0df05d7a",
+      "bytes": 442433
+    }
+  },
+  "source": "https://www.npmjs.com/package/lucide/v/1.47.0",
+  "note": "Vendored build-time with `vs.py libs --install`. Renders never fetch this."
+}

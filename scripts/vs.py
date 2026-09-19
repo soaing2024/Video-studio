@@ -3,6 +3,7 @@
 
     python vs.py doctor [--install-ffmpeg]
     python vs.py probe <file>...
+    python vs.py libs [--install <name>...]
     python vs.py sprite <image> [--out dir] [--width 64 --height 96 --colors 12]
     python vs.py beats <audio> [--cuts <seconds>]
     python vs.py init <dir> [--name x] [--duration 20]
@@ -34,7 +35,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 from lib import (  # noqa: E402
-    assemble, beats, brief as brief_mod, choreography, imagegen, montage, motion,
+    assemble, beats, brief as brief_mod, choreography, imagegen, libs, montage, motion,
     narrate, probe, render, runtime, sprite, spec as specmod, style, tts, verify,
 )
 
@@ -97,6 +98,18 @@ def cmd_doctor(args) -> int:
 def cmd_probe(args) -> int:
     ffmpeg = _ffmpeg()
     emit({p: probe.any_file(ffmpeg, p) for p in args.files})
+    return 0
+
+
+def cmd_libs(args) -> int:
+    """What a scene may use: vendored browser libraries, and how to add one."""
+    if args.install:
+        try:
+            libs.install(args.install, log=lambda m: print(m, file=sys.stderr))
+        except libs.LibError as e:
+            emit({"ok": False, "error": str(e)})
+            return 1
+    emit(libs.describe())
     return 0
 
 
@@ -340,7 +353,7 @@ def cmd_preview(args) -> int:
            "--scene", str(render.scene_path(seg)), "--out", str(out.with_suffix(".mp4")),
            "--data", str(data_file), "--fps", str(spec["video"]["fps"]),
            "--duration", str(seg["duration"]), "--width", str(w), "--height", str(h),
-           "--still", str(args.at), "--still-out", str(out)] + render.runtime_args()
+           "--still", str(args.at), "--still-out", str(out)] + render.runtime_args(spec, seg)
     import subprocess
     proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
                           env=render.runtime_env())
@@ -526,6 +539,11 @@ def build_parser() -> argparse.ArgumentParser:
     pr = sub.add_parser("probe", help="inspect images / audio / video")
     pr.add_argument("files", nargs="+")
     pr.set_defaults(func=cmd_probe)
+
+    lb = sub.add_parser("libs", help="list or vendor the browser libraries a scene may use")
+    lb.add_argument("--install", nargs="+", metavar="NAME",
+                    help="vendor these libraries from npm (build-time only; renders stay offline)")
+    lb.set_defaults(func=cmd_libs)
 
     sp = sub.add_parser("sprite", help="convert an image into a pixel-art sprite")
     sp.add_argument("image")

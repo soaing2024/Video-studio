@@ -1,12 +1,14 @@
 /* scene.js - plumbing for a hand-written shot, and nothing else.
  *
  * This file deliberately contains no visual identity: no palette, no layout, no motion style.
- * It gives a scene the four things every shot needs and nothing more:
+ * It gives a scene the things every shot needs and nothing more:
  *
  *   Scene.mount(opts)   -> { stage, layer(name), canvas(name) }
  *   Scene.type(el, size, opts)  -> applies one entry from the type scale
  *   Scene.safe()        -> the box that survives platform UI and the progress bar
  *   Scene.ready()       -> set __sceneReady, so the renderer knows `seek` exists
+ *   Scene.icon(name, opts)      -> an <svg> from a vendored icon set (`"libs": ["lucide"]`)
+ *   Scene.iconNames()   -> the icon names that set actually provides
  *
  * A scene is: build your own elements, then expose `window.seek(t)` as a pure function of t.
  * Compose the shot from references/choreography.md - do not look for a skeleton to fill.
@@ -66,6 +68,58 @@
     return el;
   }
 
+  /* Icons come from a vendored set and are built by hand into an <svg>.
+   * Nothing here reads a clock: an icon is part of the still frame, and whatever moves it is the
+   * scene's own t-derived transform. Opt in with `"libs": ["lucide"]` in project.json. */
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  let ICON_INDEX = null;
+
+  function iconKey(name) {
+    return String(name || "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+  }
+
+  function iconMap() {
+    const lib = global.lucide;
+    if (!lib || !lib.icons) {
+      throw new Error('Scene.icon needs a vendored icon library: add "libs": ["lucide"] to project.json, then run: python vs.py libs --install lucide');
+    }
+    if (!ICON_INDEX) {
+      ICON_INDEX = new Map();
+      for (const [key, value] of Object.entries(lib.icons)) {
+        if (Array.isArray(value)) ICON_INDEX.set(iconKey(key), { key, node: value });
+      }
+    }
+    return ICON_INDEX;
+  }
+
+  function iconNames() {
+    return [...iconMap().values()].map((v) => v.key).sort();
+  }
+
+  function icon(name, opts) {
+    const o = opts || {};
+    const hit = iconMap().get(iconKey(name));
+    if (!hit) {
+      throw new Error(`Scene.icon: no icon named "${name}". Both "arrow-right" and "ArrowRight" work; Scene.iconNames() lists all of them.`);
+    }
+    const size = o.size || 48;
+    const svg = document.createElementNS(SVG_NS, "svg");
+    const attrs = {
+      viewBox: "0 0 24 24", width: size, height: size, fill: "none",
+      stroke: o.color || "currentColor", "stroke-width": o.strokeWidth || 2,
+      "stroke-linecap": "round", "stroke-linejoin": "round"
+    };
+    for (const key of Object.keys(attrs)) svg.setAttribute(key, attrs[key]);
+    svg.style.display = "block";
+    if (o.className) svg.setAttribute("class", o.className);
+    for (const [tag, child] of hit.node) {
+      const el = document.createElementNS(SVG_NS, tag);
+      for (const key of Object.keys(child || {})) el.setAttribute(key, child[key]);
+      svg.appendChild(el);
+    }
+    return svg;
+  }
+
   function safe() {
     return {
       top: global.innerHeight * SAFE.top,
@@ -79,5 +133,5 @@
     global.__sceneReady = true;
   }
 
-  global.Scene = { mount, type, safe, ready, SAFE };
+  global.Scene = { mount, type, safe, ready, SAFE, icon, iconNames };
 })(window);

@@ -108,6 +108,18 @@ python vs.py beats assets/track.mp3 --cuts 45 --min-len 0.8
 ```
 
 ## 出片前检查
+**图标与动效库**：工程里写 `"libs": ["lucide", "lottie", "anime"]`，渲染器会把库注入页面，场景里不用写 `<script src>`。
+
+```js
+const icon = Scene.icon("arrow-right", { size: 64, color: "#e0455f" });   // 图标是 DOM，无字体、无联网
+const box  = Anim.lottie(host, SCENE.assets.motion, { fps: 30 });        // AE/Bodymovin 导出放 assets/*.json
+const tl   = Anim.timeline(3, (t) => t.add(el, { x: [0, 200], duration: 2000 }));
+window.seek = (t) => { box.seek(t % box.duration); tl.seek(t); icon.style.transform = `translateX(${t * 40}px)`; };
+```
+
+已落盘：`lucide`（ISC，2108 图标）、`lottie`（MIT）、`anime`（MIT）；需要其他库先 `python vs.py libs --install <名字>`。
+能自己用纯函数写出来的动效，仍然不要引库（规则与授权见 [libraries.md](libraries.md)）。
+
 
 1. `verify` 全绿：时长、分辨率、内容、淡入淡出、色板、音量。
 2. 每个章节抽一帧看一眼，不要只看第一帧。

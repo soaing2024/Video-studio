@@ -146,6 +146,8 @@ const steps = chroma.scale(["#0d1b2a", "#3cd3d4"]).mode("lch").colors(7);
 | **d3-scale / d3-shape** | ISC | 纯函数 | 坐标、比例尺、路径生成 | 没有动画，正好天然满足 `seek` |
 
 **选型顺序**（建议照这个顺序问，能停在前面就别往后走）：
+图标库列在 [libraries.md §2](libraries.md)：Lucide（ISC，2108 个）已经落盘，`Scene.icon()` 直接可用；其余几个能不能进这条流水线，那里逐条写了原因。
+
 
 1. 这只是"一张图 + 一段文字"吗？→ 用自带模板 + chroma/d3 的纯函数，**不要引入库**。
 2. 是别人做好的 MG 动效吗？→ Lottie（把 AE 导出的 JSON 直接播）。
@@ -154,6 +156,15 @@ const steps = chroma.scale(["#0d1b2a", "#3cd3d4"]).mode("lch").colors(7);
 5. 需要 3D 或大量精灵吗？→ Three.js / PixiJS。
 
 ### 2.3 离线 vendor 流程
+
+一条命令就能做完（内部就是下面那段 `npm pack`）：
+
+```powershell
+python vs.py libs                     # 看已落盘 / 可安装的库
+python vs.py libs --install <名字>    # 装一次；渲染期永远不联网
+```
+
+手工流程（装不在注册表里的库时用）：
 
 ```
 mkdir assets/lib/<name>

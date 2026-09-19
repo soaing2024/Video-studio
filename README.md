@@ -86,6 +86,7 @@ python vs.py run 我的项目\project.json --jobs 3
 | `narrate <项目> --script 台词.txt` | 合成旁白、按语音长度定时、生成字幕 |
 | `montage <素材目录> --music 音乐.mp3 --out 项目.json` | 从素材文件夹自动生成混剪工程 |
 | `init <目录> [--duration N]` | 新建工程（含一个待写的场景） |
+| `libs [--install 名称...]` | 看已落盘的浏览器库，或从 npm 装一个（只在构建时联网） |
 | `plan <项目>` | 空跑：问题清单、缓存命中、预计渲染时长 |
 | `preview <项目> [--segment id] [--at 2.0]` | 渲单帧，仅当纸面判断不了具体疑问时用 |
 | `render <项目> [--jobs N] [--force]` | 只渲染（命中缓存则跳过） |
@@ -152,6 +153,33 @@ python vs.py setup --test 测试图.png                          # 立刻验证�
 整片共用一句 `image_style`（由风格签名给出）会拼在每个提示词后面，保证一组图看起来是一套。`imagegen --dry-run` 可以只看请求不发出去。
 
 ## 项目配置
+## 四、图标与动效库：离线注入，不改场景路径
+
+外部库在这条流水线里只有一种合法形态：**dist 随仓库走、渲染时不联网、能按 `t` 求值**。
+
+```powershell
+python vs.py libs                      # 已经落盘了哪些、还能装哪些
+python vs.py libs --install anime       # 需要时才从 npm 取一次（构建期，渲染期不联网）
+```
+
+工程里写 `"libs": ["lucide", "lottie"]`，渲染器把库文件注入页面（和 `Scene` / `Anim` / `Kit` 同一条路径），
+**场景里不用写 `<script src>`**——场景会被复制进工程，相对路径会断。
+
+| 库 | 授权 | 在场景里怎么用 |
+| --- | --- | --- |
+| `lucide` 1.47（2108 个图标） | ISC | `Scene.icon("arrow-right", { size: 64, color: "#e0455f" })` |
+| `lottie` 5.13 | MIT | `Anim.lottie(host, SCENE.assets.motion, { fps: 30 }).seek(t)` |
+| `anime` 4.5 | MIT | `Anim.timeline(3, (tl) => tl.add(el, { x: [0, 200], duration: 2000 })).seek(t)` |
+| `d3-scale` 4.0（需要时再装） | ISC | 纯函数，直接算坐标与刻度 |
+
+两个动效包装只做一件事：库只创建一次、关掉自动播放，然后每帧告诉它“站在 `t`”。所以
+**同一个 `t` 必然同一帧**（实测同一帧两次渲染 sha256 一致）。能自己用纯函数写出来的效果，仍然不要引库。
+
+`.json` 素材会被解析后注入 `SCENE.assets`（而不是文件 URL）：lottie 的 Bodymovin 导出直接放
+`assets/*.json` 即可——`file://` 下的 XHR 本来也会被浏览器拦掉。
+
+图标只在承担信息时用（方向、状态、来源），不要当装饰。完整的授权清单、以及 Tabler / Phosphor /
+Simple Icons 各自能不能进这条流水线，见 [references/libraries.md](references/libraries.md) §2。
 
 一份 `project.json` 描述整支片子（支持 `//` 注释）：
 
@@ -170,6 +198,7 @@ python vs.py setup --test 测试图.png                          # 立刻验证�
   },
   "duration": 24.0,
   "scene": "scenes/take.html",
+  "libs": ["lucide", "anime"],       // 可选：vendored 进 assets/lib 的浏览器库
   "hold": [[6.0, 11.0]],              // 这几秒画面真的不变，渲染器复用一帧
   "data": { "title": "…", "caption": "…" },
   "audio": {
@@ -440,6 +469,7 @@ video-studio/
 │  ├─ scenes/_blank.html    空白场景骨架（只有管线，没有任何设计）
 │  ├─ examples/             三个可运行示例工程
 │  ├─ palettes.json         配色预设
+│  ├─ lib/                  vendored 浏览器库（lucide / lottie / anime + 各自 LICENSE）
 │  └─ runtime/scene.js      场景接线：mount / type / safe / ready
 ├─ references/
 │  ├─ pipeline.md           原理、失败模式、性能数据
@@ -458,7 +488,7 @@ video-studio/
 │  ├─ qc_video.py           抽帧 / 分区墨量 / ASCII 出图
 │  ├─ taste_check.py        节奏（--rhythm）与构图（--stills）测量
 │  ├─ beat_audit.py         交接审计 + 时间轴图
-│  └─ lib/                  运行时探测、渲染编排、剪辑装配、验收、TTS、混剪等
+│  └─ lib/                  运行时探测、渲染编排、库注入（libs.py）、剪辑装配、验收、TTS、混剪等
 └─ vendor/                  首次运行自动下载的 ffmpeg（.gitignore 已忽略）
 ```
 
@@ -467,6 +497,10 @@ video-studio/
 ## 授权
 
 代码采用 MIT（见 `LICENSE`）。仓库只包含源码，不打包 ffmpeg 与 Chromium。
+
+`assets/lib/` 下随仓库分发四个可选的浏览器库：Lucide（ISC）、lottie-web（MIT）、anime.js（MIT）、
+d3-scale（ISC，按需安装）。每个目录都带自己的 `LICENSE` 与记录包名/版本/来源/sha256 的
+`manifest.json`；它们都是宽松许可，可随本项目一起分发。GSAP 这类“免费但非 OSI 开源”的库不默认落盘。
 
 - ffmpeg 由 `vs.py doctor --install-ffmpeg` 按需安装，该构建启用了 libx264，属 **GPL**。
   若你要把它随商业产品一起分发，请先评估 GPL 义务，或改用 LGPL 构建。

@@ -1,0 +1,20 @@
+{
+  "name": "anime",
+  "package": "animejs",
+  "version": "4.5.0",
+  "license": "MIT",
+  "kind": "motion",
+  "global": "anime",
+  "provides": "timelines and tweens with an explicit seek()",
+  "drive": "createTimeline({autoplay:false}); timeline.seek(t) - no engine ticker",
+  "entry": "anime.umd.min.js",
+  "files": {
+    "anime.umd.min.js": {
+      "from": "dist/bundles/anime.umd.min.js",
+      "sha256": "8d5b3a58a1f64023a04a4cedeef135a2263b18da04b35177ac13438a0bad033b",
+      "bytes": 118043
+    }
+  },
+  "source": "https://www.npmjs.com/package/animejs/v/4.5.0",
+  "note": "Vendored build-time with `vs.py libs --install`. Renders never fetch this."
+}
