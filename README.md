@@ -152,8 +152,7 @@ python vs.py setup --test 测试图.png                          # 立刻验证�
 
 整片共用一句 `image_style`（由风格签名给出）会拼在每个提示词后面，保证一组图看起来是一套。`imagegen --dry-run` 可以只看请求不发出去。
 
-## 项目配置
-## 四、图标与动效库：离线注入，不改场景路径
+## 四、图标、动效与 3D 库：离线注入，不改场景路径
 
 外部库在这条流水线里只有一种合法形态：**dist 随仓库走、渲染时不联网、能按 `t` 求值**。
 
@@ -173,6 +172,23 @@ python vs.py libs --install anime       # 需要时才从 npm 取一次（构建
 | `d3-scale` 4.0（需要时再装） | ISC | 纯函数，直接算坐标与刻度 |
 | `three` 0.186 | MIT | `Scene.three()` / `Scene.css3d()` / `Scene.surface()`，在 `seek(t)` 里调 `render()` |
 
+**3D：一个 WebGL 图层，外加两种和 2D 合成的方式。**
+
+```js
+const view = Scene.three({ background: "#080a0b" });   // WebGL：scene / camera / renderer 直接给你
+view.scene.add(mesh); view.environment(); view.bloom({ strength: .5 });
+
+const css = Scene.css3d();            // 真 DOM 摆进 3D（透视、倾斜、纵深）
+const s   = Scene.surface(512, 320);  // 2D 画布 → THREE.CanvasTexture
+
+window.seek = (t) => { mesh.rotation.y = t * .55; view.render(); css.render(); };
+```
+
+three 是唯一需要打包的库：官方从 r150 起只发 ESM，`vs.py libs --install three` 会调一次 esbuild 把它打成单文件 IIFE。
+WebGL 在本机是软件渲染，1280×720 + bloom 实测约 0.2 秒/帧；**3D 同样只能按 `t` 求值**。
+四种组合方式（3D 垫底 + DOM 文字 / CSS3D / Canvas 贴图 / bloom 只作用于 3D）、镜头光照默认值与禁忌清单，
+见 [references/three-d.md](references/three-d.md)。
+
 两个动效包装只做一件事：库只创建一次、关掉自动播放，然后每帧告诉它“站在 `t`”。所以
 **同一个 `t` 必然同一帧**（实测同一帧两次渲染 sha256 一致）。能自己用纯函数写出来的效果，仍然不要引库。
 
@@ -181,6 +197,8 @@ python vs.py libs --install anime       # 需要时才从 npm 取一次（构建
 
 图标只在承担信息时用（方向、状态、来源），不要当装饰。完整的授权清单、以及 Tabler / Phosphor /
 Simple Icons 各自能不能进这条流水线，见 [references/libraries.md](references/libraries.md) §2。
+
+## 项目配置
 
 一份 `project.json` 描述整支片子（支持 `//` 注释）：
 
@@ -468,7 +486,6 @@ video-studio/
 ├─ assets/
 │  ├─ starter/               可复用工程骨架（场景管线 + 工程模板）
 │  ├─ scenes/_blank.html    空白场景骨架（只有管线，没有任何设计）
-│  ├─ examples/             三个可运行示例工程
 │  ├─ palettes.json         配色预设
 │  ├─ lib/                  vendored 浏览器库（lucide / lottie / anime / three + 各自 LICENSE）
 │  ├─ runtime/scene.js      场景接线：mount / type / safe / ready
