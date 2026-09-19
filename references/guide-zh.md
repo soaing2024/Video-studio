@@ -117,6 +117,26 @@ const tl   = Anim.timeline(3, (t) => t.add(el, { x: [0, 200], duration: 2000 }))
 window.seek = (t) => { box.seek(t % box.duration); tl.seek(t); icon.style.transform = `translateX(${t * 40}px)`; };
 ```
 
+**3D**：`"libs": ["three"]` 装一次（`python vs.py libs --install three`），然后
+
+```js
+const view = Scene.three({ background: "#080a0b" });   // WebGL 图层
+view.scene.add(mesh); view.environment(); view.bloom({ strength: .5 });
+const css  = Scene.css3d();                            // 真 DOM 摆进 3D
+const s    = Scene.surface(512, 320);                  // 2D 画布 → CanvasTexture
+window.seek = (t) => { mesh.rotation.y = t; view.render(); css.render(); };
+```
+
+注意：WebGL 是软件渲染（实测 1280×720 + bloom 约 0.2 秒/帧），3D 也必须只按 `t` 求值。
+四种 2D×3D 组合方式、镜头光照默认值与禁忌清单见 [three-d.md](three-d.md)。
+
+```js
+const icon = Scene.icon("arrow-right", { size: 64, color: "#e0455f" });   // 图标是 DOM，无字体、无联网
+const box  = Anim.lottie(host, SCENE.assets.motion, { fps: 30 });        // AE/Bodymovin 导出放 assets/*.json
+const tl   = Anim.timeline(3, (t) => t.add(el, { x: [0, 200], duration: 2000 }));
+window.seek = (t) => { box.seek(t % box.duration); tl.seek(t); icon.style.transform = `translateX(${t * 40}px)`; };
+```
+
 已落盘：`lucide`（ISC，2108 图标）、`lottie`（MIT）、`anime`（MIT）；需要其他库先 `python vs.py libs --install <名字>`。
 能自己用纯函数写出来的动效，仍然不要引库（规则与授权见 [libraries.md](libraries.md)）。
 

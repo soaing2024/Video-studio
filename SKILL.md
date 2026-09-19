@@ -155,6 +155,10 @@ what could be; `vs.py libs --install <name>` vendors one from npm at build time.
   Bodymovin export and it arrives parsed in `SCENE.assets` (a `file://` XHR would be blocked).
 - `anime` (MIT) - `Anim.timeline(seconds, build).seek(t)`, with the engine's autoplay and ticker
   left off.
+- `three` (MIT, r186) - `Scene.three()` for a WebGL layer (plus `environment()` and `bloom()`),
+  `Scene.css3d()` for real DOM placed in 3D, and `Scene.surface()` for a 2D canvas used as a
+  texture. Combining 2D and 3D has its own document:
+  [references/three-d.md](references/three-d.md).
 
 Both motion wrappers exist to keep the one hard rule intact: the library is built once, then told
 where to stand on every frame. Nothing starts a clock, so the same `t` still gives the same
@@ -228,6 +232,10 @@ pass, and the list of skeletons that are already used up:
 - Libraries worth reaching for - icons, motion, footage, sound - with the licence and access rules for
   each, and why anything external has to be vendored before a render:
   [references/libraries.md](references/libraries.md). Written in Chinese.
+- 2D and 3D in one shot - the four ways to combine a WebGL layer, real DOM in 3D (CSS3D), canvas
+  textures and DOM overlays; camera and lighting defaults; the measured cost of bloom; and the
+  list of things that break frame exactness: [references/three-d.md](references/three-d.md).
+  Written in Chinese.
 - Advanced technique prompts - colour scales (chroma.js and friends), external motion libraries
   and how to vendor them offline, plus design and storyboarding vocabulary with copy-ready
   prompts: [references/prompts.md](references/prompts.md). Written in Chinese, because it is

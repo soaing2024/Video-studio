@@ -46,7 +46,7 @@ def hold_args(seg: dict) -> list[str]:
     return ["--hold", ",".join(f"{float(a):.3f}-{float(b):.3f}" for a, b in holds)]
 
 
-RUNTIME_FILES = ("scene.js", "anim.js", "kit.js")
+RUNTIME_FILES = ("scene.js", "anim.js", "kit.js", "three-kit.js")
 
 
 def libs_for(spec: dict, seg: dict | None = None) -> list[Path]:

@@ -34,7 +34,8 @@
 | **GSAP** 3.15 | 免费但**非 OSI 开源** | `timeline({paused:true}).seek(t)` | 复杂时间轴、SVG、逐字 |
 | anime.js 4.5 | MIT | v4 是 `createTimeline()` 那套（seek 接口**待核**） | 轻量补间 |
 | Motion 4.x | MIT | ⚠ 基于 WAAPI 的部分**无法** seek | DOM 微交互（渲染链里慎用） |
-| **Three.js** 0.186 / **PixiJS** 8.21 | MIT | 自己调 `renderer.render()`，用 `t` 驱动 | 3D / 2D 精灵 |
+| **Three.js** 0.186 · 已落盘 | MIT | `renderer.render()` 自己调，用 `t` 驱动 | 3D；与 2D 的四种组合方式见 [three-d.md](three-d.md) |
+| **PixiJS** 8.21 | MIT | 自己调 `renderer.render(stage)` | 2D 精灵、粒子、像素风 |
 | d3-scale / d3-shape | ISC | 纯函数 | 坐标、比例尺、路径 |
 | SplitType 0.3 | ISC | 纯拆分，无时钟 | 逐字/逐行动画的前置 |
 
@@ -49,7 +50,7 @@ python vs.py libs --install lottie     # 内部就是 npm pack + 解包 + 留 di
 装好后在工程里写 `"libs": ["lottie"]`，渲染器会把它注入页面。**场景里不要写 `<script src>`**：
 场景文件会被复制进工程，相对路径会断。**不要用 CDN，不要留 node_modules。**
 
-已经落盘并接进流水的四个（`assets/lib/`，随仓库走，渲染时离线）：
+已经落盘并接进流水的五个（`assets/lib/`，随仓库走，渲染时离线）：
 
 | 名字 | 授权 | 用途 | 怎么驱动 |
 | --- | --- | --- | --- |
@@ -57,6 +58,11 @@ python vs.py libs --install lottie     # 内部就是 npm pack + 解包 + 留 di
 | `lottie` | MIT | AE/Bodymovin 导出的 MG 动效 | `Anim.lottie(host, data, {fps}).seek(t)` |
 | `anime` | MIT | 时间轴与补间 | `Anim.timeline(秒数, build).seek(t)` |
 | `d3-scale` | ISC | 比例尺、刻度（纯函数） | 不装也行，装了不用 seek |
+| `three` | MIT | WebGL 场景 + CSS3D + 像素级辉光 | `Scene.three()` / `Scene.css3d()`，在 `seek(t)` 里调 `render()` |
+
+`three` 是唯一需要 vendor 时打包的：官方从 r150 起只发 ESM，所以 `vs.py libs --install three` 会调一次
+esbuild，把核心与四个 addon 打成单文件 IIFE 并挂到 `window.THREE`。2D 与 3D 具体怎么合成，
+单独写在 [three-d.md](three-d.md)。
 
 **不要引入库的情形**：能用纯函数直接算的（位置、宽高、颜色、透明度）自己算。
 实测参考：获奖动效网页里 **9/15 根本没有动画库**（手写或自带小引擎）。

@@ -78,6 +78,35 @@ REGISTRY: dict[str, dict] = {
         "provides": "linear / band / log / ordinal scales and ticks - pure functions",
         "drive": "no clock at all: value at t is just f(t)",
     },
+    # three ships ESM only since r150 and the injection path has no module loader, so it is
+    # bundled into one classic script at vendor time.
+    "three": {
+        "package": "three",
+        "version": "0.186.0",
+        "license": "MIT",
+        "kind": "3d",
+        "global": "THREE",
+        "bundle": {
+            "out": "three.iife.min.js",
+            "esbuild": "0.28.2",
+            # `addInitScript` evaluates the file as a function body, so a bare `var THREE` would
+            # stay local. This footer is what makes window.THREE exist.
+            "footer": "window.THREE=THREE;",
+            "entry": [
+                'export * from "three";',
+                'export { CSS3DRenderer, CSS3DObject, CSS3DSprite } from "three/examples/jsm/renderers/CSS3DRenderer.js";',
+                'export { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";',
+                'export { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";',
+                'export { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";',
+                'export { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";',
+                'export { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";',
+            ],
+        },
+        "provides": ("WebGL scene graph, plus CSS3DRenderer (real DOM inside the 3D scene), "
+                     "RoomEnvironment (studio lighting with no HDR file) and the bloom / effect "
+                     "composer"),
+        "drive": "build the scene once, update it from t, call view.render() inside seek(t)",
+    },
 }
 
 ALIASES = {
@@ -87,12 +116,23 @@ ALIASES = {
     "anime.js": "anime",
     "d3": "d3-scale",
     "d3scale": "d3-scale",
+    "threejs": "three",
+    "three.js": "three",
+    "3d": "three",
 }
 
 
 def normalize(name: str) -> str:
     key = str(name or "").strip().lower()
     return ALIASES.get(key, key)
+
+
+def entry_filename(name: str) -> str:
+    """The file a vendored library exposes, whether it was copied or bundled."""
+    reg = REGISTRY.get(normalize(name), {})
+    if reg.get("bundle"):
+        return str(reg["bundle"]["out"])
+    return next(iter(reg.get("files", {}).values()), "")
 
 
 def manifest_of(name: str) -> dict | None:
@@ -172,7 +212,8 @@ def describe() -> dict:
             "global": reg.get("global") or (man or {}).get("global"),
             "provides": reg.get("provides") or (man or {}).get("provides"),
             "drive": reg.get("drive") or (man or {}).get("drive"),
-            "entry": (man or {}).get("entry") or ",".join(reg.get("files", {}).values()),
+            "entry": (man or {}).get("entry") or entry_filename(name),
+            "bundled": bool(reg.get("bundle")),
             "path": str(LIB_DIR / name / str((man or {}).get("entry") or "")) if man else None,
         })
     return {"lib_dir": str(LIB_DIR), "libraries": items}
@@ -233,18 +274,22 @@ def _install_one(npm: str, key: str, reg: dict, log) -> dict:
         with tarfile.open(tgz) as tf:
             tf.extractall(tmpdir)
         pkg = tmpdir / "package"
-        files = {}
-        for src, name in reg["files"].items():
-            s = pkg / src
-            if not s.is_file():
-                raise LibError(f"{spec} has no {src}; the registry entry needs updating")
-            shutil.copy2(s, dest / name)
-            files[name] = {"from": src, "sha256": sha256(dest / name),
-                           "bytes": (dest / name).stat().st_size}
+        # The LICENSE is taken first: bundling moves the package directory out from under us.
         license_src = next((p for p in pkg.glob("LICENSE*") if p.is_file()), None)
         if not license_src:
             raise LibError(f"{spec} ships no LICENSE file; refusing to vendor it")
         shutil.copy2(license_src, dest / "LICENSE")
+        if reg.get("bundle"):
+            files = _build_bundle(spec, reg, pkg, dest, log)
+        else:
+            files = {}
+            for src, name in reg["files"].items():
+                s = pkg / src
+                if not s.is_file():
+                    raise LibError(f"{spec} has no {src}; the registry entry needs updating")
+                shutil.copy2(s, dest / name)
+                files[name] = {"from": src, "sha256": sha256(dest / name),
+                               "bytes": (dest / name).stat().st_size}
     manifest = {
         "name": key,
         "package": reg["package"],
@@ -254,15 +299,52 @@ def _install_one(npm: str, key: str, reg: dict, log) -> dict:
         "global": reg["global"],
         "provides": reg["provides"],
         "drive": reg["drive"],
-        "entry": next(iter(reg["files"].values())),
+        "entry": entry_filename(key),
         "files": files,
         "source": f"https://www.npmjs.com/package/{reg['package']}/v/{reg['version']}",
         "note": "Vendored build-time with `vs.py libs --install`. Renders never fetch this.",
     }
+    if reg.get("bundle"):
+        manifest["bundle"] = {
+            "tool": f"esbuild@{reg['bundle']['esbuild']}",
+            "format": "iife",
+            "global": reg["global"],
+            "footer": reg["bundle"]["footer"],
+            "entry": reg["bundle"]["entry"],
+        }
     (dest / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     log(f"  vendored {key} {reg['version']} ({reg['license']}) -> {dest}")
     return manifest
+
+
+def _build_bundle(spec: str, reg: dict, pkg: Path, dest: Path, log) -> dict:
+    """ESM-only package -> one classic script that defines the global a scene expects.
+
+    esbuild resolves through node_modules, so the extracted package is moved into a throwaway
+    node_modules first. This step is what makes `libs: ["three"]` possible at all: since r150
+    three publishes ESM only, and the injection path has no module loader."""
+    b = reg["bundle"]
+    work = pkg.parent
+    node_modules = work / "node_modules"
+    node_modules.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(pkg), str(node_modules / reg["package"]))
+    entry = work / "entry.mjs"
+    entry.write_text("\n".join(b["entry"]) + "\n", encoding="utf-8")
+    out = dest / b["out"]
+    log(f"  bundling {spec} with esbuild@{b['esbuild']} (ESM -> IIFE)")
+    npx = shutil.which("npx") or shutil.which("npx.cmd")
+    if not npx:
+        raise LibError("npx not found. Bundling an ESM-only package needs it once, at vendor time.")
+    cmd = [npx, "--yes", f"esbuild@{b['esbuild']}", str(entry),
+           "--bundle", "--format=iife", f"--global-name={reg['global']}",
+           "--minify", "--target=es2020", "--legal-comments=none",
+           f"--footer:js={b['footer']}", f"--outfile={out}"]
+    proc = _run(cmd, cwd=work)
+    if proc.returncode != 0 or not out.is_file():
+        raise LibError(f"esbuild failed for {spec}:\n{proc.stdout}\n{proc.stderr}")
+    return {b["out"]: {"from": "+".join(b["entry"]), "sha256": sha256(out),
+                       "bytes": out.stat().st_size}}
 
 
 def main(argv=None) -> int:

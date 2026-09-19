@@ -1,0 +1,35 @@
+{
+  "name": "three",
+  "package": "three",
+  "version": "0.186.0",
+  "license": "MIT",
+  "kind": "3d",
+  "global": "THREE",
+  "provides": "WebGL scene graph, plus CSS3DRenderer (real DOM inside the 3D scene), RoomEnvironment (studio lighting with no HDR file) and the bloom / effect composer",
+  "drive": "build the scene once, update it from t, call view.render() inside seek(t)",
+  "entry": "three.iife.min.js",
+  "files": {
+    "three.iife.min.js": {
+      "from": "export * from \"three\";+export { CSS3DRenderer, CSS3DObject, CSS3DSprite } from \"three/examples/jsm/renderers/CSS3DRenderer.js\";+export { RoomEnvironment } from \"three/examples/jsm/environments/RoomEnvironment.js\";+export { EffectComposer } from \"three/examples/jsm/postprocessing/EffectComposer.js\";+export { RenderPass } from \"three/examples/jsm/postprocessing/RenderPass.js\";+export { UnrealBloomPass } from \"three/examples/jsm/postprocessing/UnrealBloomPass.js\";+export { OutputPass } from \"three/examples/jsm/postprocessing/OutputPass.js\";",
+      "sha256": "861da4ce56c8a73752f539697cfb18b4a8c97f7e8161c59e8095be522f906fbe",
+      "bytes": 767666
+    }
+  },
+  "source": "https://www.npmjs.com/package/three/v/0.186.0",
+  "note": "Vendored build-time with `vs.py libs --install`. Renders never fetch this.",
+  "bundle": {
+    "tool": "esbuild@0.28.2",
+    "format": "iife",
+    "global": "THREE",
+    "footer": "window.THREE=THREE;",
+    "entry": [
+      "export * from \"three\";",
+      "export { CSS3DRenderer, CSS3DObject, CSS3DSprite } from \"three/examples/jsm/renderers/CSS3DRenderer.js\";",
+      "export { RoomEnvironment } from \"three/examples/jsm/environments/RoomEnvironment.js\";",
+      "export { EffectComposer } from \"three/examples/jsm/postprocessing/EffectComposer.js\";",
+      "export { RenderPass } from \"three/examples/jsm/postprocessing/RenderPass.js\";",
+      "export { UnrealBloomPass } from \"three/examples/jsm/postprocessing/UnrealBloomPass.js\";",
+      "export { OutputPass } from \"three/examples/jsm/postprocessing/OutputPass.js\";"
+    ]
+  }
+}

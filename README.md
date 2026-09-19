@@ -171,6 +171,7 @@ python vs.py libs --install anime       # 需要时才从 npm 取一次（构建
 | `lottie` 5.13 | MIT | `Anim.lottie(host, SCENE.assets.motion, { fps: 30 }).seek(t)` |
 | `anime` 4.5 | MIT | `Anim.timeline(3, (tl) => tl.add(el, { x: [0, 200], duration: 2000 })).seek(t)` |
 | `d3-scale` 4.0（需要时再装） | ISC | 纯函数，直接算坐标与刻度 |
+| `three` 0.186 | MIT | `Scene.three()` / `Scene.css3d()` / `Scene.surface()`，在 `seek(t)` 里调 `render()` |
 
 两个动效包装只做一件事：库只创建一次、关掉自动播放，然后每帧告诉它“站在 `t`”。所以
 **同一个 `t` 必然同一帧**（实测同一帧两次渲染 sha256 一致）。能自己用纯函数写出来的效果，仍然不要引库。
@@ -469,8 +470,9 @@ video-studio/
 │  ├─ scenes/_blank.html    空白场景骨架（只有管线，没有任何设计）
 │  ├─ examples/             三个可运行示例工程
 │  ├─ palettes.json         配色预设
-│  ├─ lib/                  vendored 浏览器库（lucide / lottie / anime + 各自 LICENSE）
-│  └─ runtime/scene.js      场景接线：mount / type / safe / ready
+│  ├─ lib/                  vendored 浏览器库（lucide / lottie / anime / three + 各自 LICENSE）
+│  ├─ runtime/scene.js      场景接线：mount / type / safe / ready
+│  └─ runtime/three-kit.js  3D 接线：Scene.three / Scene.css3d / Scene.surface
 ├─ references/
 │  ├─ pipeline.md           原理、失败模式、性能数据
 │  ├─ longform.md           长视频工作流
@@ -480,6 +482,7 @@ video-studio/
 │  ├─ taste.md              审美闸门：比例/字号/色彩预算/参照体系/AI 味黑名单
 │  ├─ rhythm-handoff.md     “PPT 感”的三个根因与解法（重叠交接 / 共享元素 / 缩短整帧动作）
 │  ├─ motion-realism.md     7 行运动设定、12 条真实感钩子、情绪→参数
+│  ├─ three-d.md            2D × 3D：WebGL 图层 / CSS3D / Canvas 贴图的组合方式
 │  └─ guide-zh.md           中文速查
 ├─ scripts/
 │  ├─ vs.py                 命令行入口
@@ -498,7 +501,7 @@ video-studio/
 
 代码采用 MIT（见 `LICENSE`）。仓库只包含源码，不打包 ffmpeg 与 Chromium。
 
-`assets/lib/` 下随仓库分发四个可选的浏览器库：Lucide（ISC）、lottie-web（MIT）、anime.js（MIT）、
+`assets/lib/` 下随仓库分发五个可选的浏览器库：Lucide（ISC）、lottie-web（MIT）、anime.js（MIT）、three（MIT）、
 d3-scale（ISC，按需安装）。每个目录都带自己的 `LICENSE` 与记录包名/版本/来源/sha256 的
 `manifest.json`；它们都是宽松许可，可随本项目一起分发。GSAP 这类“免费但非 OSI 开源”的库不默认落盘。
 

@@ -140,7 +140,7 @@ const steps = chroma.scale(["#0d1b2a", "#3cd3d4"]).mode("lch").colors(7);
 | **GSAP** | 3.15 · 免费但**非 OSI 开源许可** | `gsap.timeline({ paused: true }).seek(t)`（dist 里已核实 `seek`） | 复杂时间轴、SVG、逐字动画 | 必须 `paused: true` 并禁掉 ticker；商用前读官方条款 |
 | anime.js | 4.5.0 · MIT | v4 是 `createTimeline()` 那套（v3 与 v4 接口不兼容），seek 接口请以官方文档为准 | 轻量补间、SVG 描边 | 本文件未逐行核实其 seek 接口 |
 | Motion | 4.x · MIT | 手动传入时间；基于 WAAPI 的部分**无法** seek | DOM 微交互 | 用在渲染链里要谨慎，WAAPI 部分天然不可帧精确 |
-| **Three.js** | 0.186 · MIT | 自己调 `renderer.render(scene, camera)`，用 `t` 驱动所有变换 | 3D、伪 3D、视差 | 禁自转/禁 ticker |
+| **Three.js** | 0.186 · MIT · **已落盘** | 自己调 `renderer.render(scene, camera)`，用 `t` 驱动所有变换 | 3D、伪 3D、视差、CSS3D | 只发 ESM，vendor 时用 esbuild 打成 IIFE；禁自转/禁 ticker |
 | **PixiJS** | 8.21 · MIT | 自己调 `renderer.render(stage)` | 2D 精灵、粒子、像素风 | 同上 |
 | SplitType | 0.3.4 · ISC | 纯拆分（把文字切成 span），本身没有时钟 | 逐字/逐行动画的前置步骤 | 拆完还要自己按 `t` 写状态 |
 | **d3-scale / d3-shape** | ISC | 纯函数 | 坐标、比例尺、路径生成 | 没有动画，正好天然满足 `seek` |
@@ -193,6 +193,9 @@ cp package/LICENSE      assets/lib/<name>/LICENSE     # 授权说明必须跟着
 - **体积与授权**：vendored 的库要在 `LICENSE` 里注明来源与许可；GSAP 这种"免费但非开源"的，
   商用交付前确认条款。
 - **别用库自带的"自动播放"**：所有动画都应该是"我给它 `t`，它给我这一帧"。
+- **只发 ESM 的包不能直接注入**：`addInitScript` 是把文件当**函数体**执行的，既没有模块加载器，
+  裸 `var THREE` 也只会变成函数里的局部变量。要么选有 UMD 产物的版本，要么在 vendor 时用 esbuild
+  打成 IIFE，并在末尾用 footer 显式写 `window.THREE=THREE;`——three 就是这么接进来的。
 
 ### 提示词模板
 
