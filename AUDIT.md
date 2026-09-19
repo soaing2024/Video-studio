@@ -1,8 +1,6 @@
 # AUDIT.md — video-studio 现状审计（改造依据）
 
-> 历史文档：记录改造前的现状与证据，不改任何代码。当前行为以 [SKILL.md](SKILL.md) 为准；
-> 文中引用的旧默认值（单进程渲染、`jobs` 的旧语义、per-segment `still` 等）已被
-> [UPGRADE.md](UPGRADE.md) 与当前代码取代。配套计划见 `PLAN.md`。
+> 本文件只描述现状与证据，不改任何代码。配套计划见 `PLAN.md`。
 > 生成方式：`audit_scan.py`（AST 扫描全部 `.py`/`.js`/`.md`），人工核对关键路径 + 一次完整的
 > 4K/60fps/30s 一镜到底实战复盘。原型索引见工作区 `work/audit/api_index.json`。
 

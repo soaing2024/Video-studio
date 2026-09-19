@@ -18,8 +18,7 @@ python <skill>\scripts\vs.py doctor --install-ffmpeg
 
 `--install-ffmpeg` 会把一个完整的 ffmpeg 装进技能的 `vendor/` 目录（约 84MB，装一次即可）。
 为什么必须装：Playwright 自带的 ffmpeg 只能编 VP8，编不了 H.264，`doctor` 会主动把它判为不合格。
-安装脚本会把二进制复制到 `vendor/` 后删掉 `vendor/pylibs`；若你看到残留的 `vendor/pylibs`，
-可以放心手动删除（`doctor --install-ffmpeg` 会按需装回）。
+装完 `vendor/pylibs` 是 pip 留下的副本，可以手动删掉省空间。
 
 ## 出片流程（都发生在方案确认之后）
 
@@ -27,18 +26,14 @@ python <skill>\scripts\vs.py doctor --install-ffmpeg
 # 1. 看素材：尺寸、透明通道、主色、时长、音量
 python vs.py probe 我的图.png 我的音乐.mp3
 
-# 2. 新建项目（生成配置 + 一个空白场景，写它才是创作本身）
-python vs.py init 我的项目 --duration 20
+  # 2. 新建项目（生成配置 + 一个空白场景，写它才是创作本身）
+  python vs.py init 我的项目 --duration 20
 
-# 3. 先自检与预算，不花渲染时间
-python vs.py check 我的项目\project.json
-python vs.py plan  我的项目\project.json --slices 6 --jobs 3
+# 3.（可选，非必要不做）纸面判断不了的疑问才渲一帧
+python vs.py preview 我的项目\project.json --segment title --at 2.5
 
-# 4.（可选，非必要不做）纸面判断不了的疑问才渲一帧
-python vs.py preview 我的项目\project.json --at 2.5
-
-# 5. 出片：渲染 + 剪辑 + 验收（一次成片）
-python vs.py run 我的项目\project.json --slices 6 --jobs 3
+# 4. 出片：渲染 + 剪辑 + 验收
+python vs.py run 我的项目\project.json --jobs 3
 ```
 
 `run` 会打印一份 JSON 验收报告。**任何一项 `ok: false` 就说明有问题**，`detail` 会告诉你该调哪个参数。
@@ -70,10 +65,8 @@ python vs.py run 我的项目\project.json --slices 6 --jobs 3
 hold 里的帧渲染器直接复用，**成本与时长无关**。经验值：5 分钟片把"真在动"的秒数压到 90 秒以内，
 其余全部 hold；用 `vs.py plan` 看 `frames_to_render`。
 
-渲染速度别背数字：`vs.py plan` 会按你的机器、分辨率与 hold 拆分给出 `ms_per_frame` 与墙钟估计。
-单镜头默认是单进程，加了 `--slices N --jobs M` 才会按时间切片并行（合并时校验总帧数）。
-像素风（320×180 渲染再整数倍放大）与 hold 区间仍是两个最有效的省钱手段。
-
+渲染速度参考（1080p、30fps）：逐帧约 0.38 秒/帧，`jobs: 3` 时五分钟片约 20 分钟；
+像素风（320×180 渲染再 4 倍放大）约 0.025 秒/帧；hold 区间几乎不花时间。
 ## 常用搭配
 
 **换风格**：`look.accent` 改主色；像素风加 `"pixelate": {"scale": 4, "colors": 16}`；
@@ -114,7 +107,7 @@ python vs.py beats assets/track.mp3 --cuts 45 --min-len 0.8
 ]
 ```
 
-## 图标、动效与 3D（可选）
+## 出片前检查
 **图标与动效库**：工程里写 `"libs": ["lucide", "lottie", "anime"]`，渲染器会把库注入页面，场景里不用写 `<script src>`。
 
 ```js
@@ -136,19 +129,26 @@ window.seek = (t) => { mesh.rotation.y = t; view.render(); css.render(); };
 
 注意：WebGL 是软件渲染（实测 1280×720 + bloom 约 0.2 秒/帧），3D 也必须只按 `t` 求值。
 四种 2D×3D 组合方式、镜头光照默认值与禁忌清单见 [three-d.md](three-d.md)。
+
+```js
+const icon = Scene.icon("arrow-right", { size: 64, color: "#e0455f" });   // 图标是 DOM，无字体、无联网
+const box  = Anim.lottie(host, SCENE.assets.motion, { fps: 30 });        // AE/Bodymovin 导出放 assets/*.json
+const tl   = Anim.timeline(3, (t) => t.add(el, { x: [0, 200], duration: 2000 }));
+window.seek = (t) => { box.seek(t % box.duration); tl.seek(t); icon.style.transform = `translateX(${t * 40}px)`; };
+```
+
 已落盘：`lucide`（ISC，2108 图标）、`lottie`（MIT）、`anime`（MIT）；需要其他库先 `python vs.py libs --install <名字>`。
 能自己用纯函数写出来的动效，仍然不要引库（规则与授权见 [libraries.md](libraries.md)）。
 
-## 出片前检查
 
 1. `verify` 全绿：时长、分辨率、内容、淡入淡出、色板、音量。
-2. 交付前抽查每个内部章节的代表帧（这是交付检查，不是设计阶段的逐拍试帧）。
+2. 每个章节抽一帧看一眼，不要只看第一帧。
 3. 章节编号 1..N 连续，和最后一段里的 `total` 对得上。
-4. 单镜头内部的重构要重叠交接；混剪里相邻片段背景太像时，给 0.4-0.6 秒交叉淡化。
+4. 相邻两段背景太像的话，接缝会像失误，给个 0.4-0.6 秒交叉淡化。
 
 ## 常见坑
 
-- 改完场景重跑即可；缓存按分片与参数键控，未变化的部分会跳过。
+- 改完场景重跑即可；整片是一个缓存单元。
 - 想强制重渲加 `--force`。
 - 中间片段在 `build/<项目名>/segments/`，删掉可以省空间，代价是下次要重渲。
 - 技能目录里的 `vendor/` 是 ffmpeg，别删；`build/` 才是可以清理的。

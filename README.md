@@ -89,17 +89,11 @@ python vs.py run 我的项目\project.json --jobs 3
 | `libs [--install 名称...]` | 看已落盘的浏览器库，或从 npm 装一个（只在构建时联网） |
 | `plan <项目>` | 空跑：问题清单、缓存命中、预计渲染时长 |
 | `preview <项目> [--segment id] [--at 2.0]` | 渲单帧，仅当纸面判断不了具体疑问时用 |
-| `render <项目> [--jobs N] [--slices N] [--force]` | 只渲染（命中缓存或未变切片则跳过） |
+| `render <项目> [--jobs N] [--force]` | 只渲染（命中缓存则跳过） |
 | `assemble <项目> [--out 成片.mp4]` | 只剪辑合成 |
 | `verify <项目>` | 只验收 |
-| `run <项目> [--jobs N] [--slices N]` | 渲染 + 剪辑 + 验收（一次成片） |
+| `run <项目> [--jobs N]` | 渲染 + 剪辑 + 验收 |
 | `selftest` | 极小工程端到端回归自检 |
-| `check <项目>` | 渲染前全时间轴自检（幽灵元素 / 出框文字 / NaN / CJK 与对比度） |
-| `patch <edits.json>` | 哈希校验的多处修改，失败整批回滚 |
-| `audio [<项目>] --cues cues.json` / `--check` | 生成或测量音效床（均值/峰值目标） |
-| `card <目录>` | 独立结尾卡工程 |
-| `api [任务]` | 查 CLI / 库函数 / 注入 API，不必读源码 |
-| `cat <文件> [--lines a:b]` / `diff <文件>` | 缓存读取 / 只看变更行 |
 
 ---
 
@@ -350,9 +344,8 @@ python vs.py run 项目\project.json
 
 ## 长视频（5 分钟以上）
 
-**成本 = 要渲染的帧数 = 时长 × 帧率 − hold 内的帧，再除以 `slices × jobs`。** 单镜头默认单进程，
-要并行得显式加 `--slices N`；5 分钟 1080p/30fps 是 9000 帧（未扣 hold），具体墙钟用
-`vs.py plan` 按你的机器估。以前可以靠"静态段落"省钱，现在没有段落了，改成在**镜头内部**声明静止：
+**成本 = 帧数 = 时长 × 帧率 ÷ 并发。** 5 分钟 1080p/30fps 是 9000 帧，单并发约 58 分钟，
+`jobs: 3` 约 20 分钟。以前可以靠"静态段落"省钱，现在没有段落了，改成在**镜头内部**声明静止：
 
 ```jsonc
 "duration": 300,
@@ -463,13 +456,11 @@ python scripts/taste_check.py my-video/my-video.mp4     # 渲染后：节奏 + �
 ## 常见问题
 
 **改了配置要重渲全部吗？**
-不用。缓存键包含场景文件内容、数据、素材修改时间和输出规格；加了 `--slices N` 后每个时间片
-各有缓存键，渲染器还会用降采样的签名探针找出真正变化的切片，只重渲那些切片。
+不用。每个段落独立缓存，缓存键包含场景文件内容、数据、素材修改时间和输出规格；没改的段落直接复用。
 强制重渲加 `--force`。
 
 **中间文件在哪？能删吗？**
-`build/<项目名>/` 下：`segments/` 是中间片段（`--slices` 时是各时间片），`voice/` 是旁白和字幕。
-删掉可省空间，代价是下次要重渲。
+`build/<项目名>/` 下：`segments/` 是中间片段，`voice/` 是旁白和字幕。删掉可省空间，代价是下次要重渲。
 仓库里 `vendor/`（ffmpeg）别删、也别提交。
 
 **配乐听不见 / 太吵？**
@@ -491,25 +482,19 @@ video-studio/
 ├─ SKILL.md                 技能入口（给 AI 代理看的规范）
 ├─ README.md                本文档
 ├─ LICENSE                  MIT（含第三方组件说明）
-├─ API.md                   CLI / 库 / 注入 API 索引（自动生成）
-├─ AUDIT.md / PLAN.md       改造审计与计划（历史文档）
-├─ UPGRADE.md               改造增量与实测（历史文档）
 ├─ agents/openai.yaml       界面元数据
 ├─ assets/
 │  ├─ starter/               可复用工程骨架（场景管线 + 工程模板）
 │  ├─ scenes/_blank.html    空白场景骨架（只有管线，没有任何设计）
 │  ├─ palettes.json         配色预设
 │  ├─ lib/                  vendored 浏览器库（lucide / lottie / anime / three + 各自 LICENSE）
-│  ├─ examples/             参考示例（director 语法演示）
-│  └─ runtime/              注入运行时：scene / anim / kit / three-kit / director
+│  ├─ runtime/scene.js      场景接线：mount / type / safe / ready
+│  └─ runtime/three-kit.js  3D 接线：Scene.three / Scene.css3d / Scene.surface
 ├─ references/
 │  ├─ pipeline.md           原理、失败模式、性能数据
 │  ├─ longform.md           长视频工作流
 │  ├─ formats.md            各种形态的做法
 │  ├─ prompts.md            高级技法提示词库（色彩色阶 / 外接动效库 / 设计分镜）
-│  ├─ creative.md           规划、视觉差异化与图片生成
-│  ├─ craft.md              动画 / 演示 / 版式三套手艺规则（中文）
-│  ├─ libraries.md          值得用的库与授权 / 离线约束（中文）
 │  ├─ choreography.md       编排规则：每拍现写画面，不套模板（含闸门与查重表）
 │  ├─ taste.md              审美闸门：比例/字号/色彩预算/参照体系/AI 味黑名单
 │  ├─ rhythm-handoff.md     “PPT 感”的三个根因与解法（重叠交接 / 共享元素 / 缩短整帧动作）
@@ -520,31 +505,25 @@ video-studio/
 │  ├─ vs.py                 命令行入口
 │  ├─ render_segment.mjs    逐帧渲染器
 │  ├─ scaffold.py           从骨架生成工程
-│  ├─ scan_scene.mjs        场景 DOM/几何探针（check 与 preview --report 用）
-│  ├─ scene_check.py        全时间轴自检的分析层
-│  ├─ api_index.py          生成 API.md / api_index.json
-│  ├─ apply_patch.py        哈希校验的多处修改器（失败整批回滚）
 │  ├─ qc_video.py           抽帧 / 分区墨量 / ASCII 出图
 │  ├─ taste_check.py        节奏（--rhythm）与构图（--stills）测量
 │  ├─ beat_audit.py         交接审计 + 时间轴图
 │  └─ lib/                  运行时探测、渲染编排、库注入（libs.py）、剪辑装配、验收、TTS、混剪等
-└─ vendor/                  ffmpeg（`doctor --install-ffmpeg` 按需落盘，GPL 构建；.gitignore 已忽略）
+└─ vendor/                  首次运行自动下载的 ffmpeg（.gitignore 已忽略）
 ```
 
 ---
 
 ## 授权
 
-代码采用 MIT（见 `LICENSE`）。源码仓库不包含 ffmpeg 与 Chromium（`vendor/` 被 `.gitignore` 排除），
-本机安装时按需落盘。
+代码采用 MIT（见 `LICENSE`）。仓库只包含源码，不打包 ffmpeg 与 Chromium。
 
-`assets/lib/` 下随仓库分发四个可选的浏览器库：Lucide（ISC）、lottie-web（MIT）、anime.js（MIT）、
-three（MIT）；d3-scale（ISC）用 `vs.py libs --install d3-scale` 按需落盘。每个库目录都带自己的
-`LICENSE` 与记录包名/版本/来源/sha256 的
+`assets/lib/` 下随仓库分发五个可选的浏览器库：Lucide（ISC）、lottie-web（MIT）、anime.js（MIT）、three（MIT）、
+d3-scale（ISC，按需安装）。每个目录都带自己的 `LICENSE` 与记录包名/版本/来源/sha256 的
 `manifest.json`；它们都是宽松许可，可随本项目一起分发。GSAP 这类“免费但非 OSI 开源”的库不默认落盘。
 
 - ffmpeg 由 `vs.py doctor --install-ffmpeg` 按需安装，该构建启用了 libx264，属 **GPL**。
   若你要把它随商业产品一起分发，请先评估 GPL 义务，或改用 LGPL 构建。
 - Chromium / Playwright（BSD）、Node.js（MIT）、Python（PSF）均由用户环境提供。
-- 场景只按名称引用系统字体。微软雅黑等系统字体不可随包分发，
+- 模板只按名称引用系统字体。微软雅黑等系统字体不可随包分发，
   如需内嵌请换用思源黑体 / Noto Sans SC（SIL OFL）。

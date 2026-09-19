@@ -1,8 +1,6 @@
 # UPGRADE.md — 这次改造改了什么、怎么用、省了多少
 
-> 历史文档：记录这次改造的增量与实测。当前规范以 [SKILL.md](SKILL.md) 为准；文中“改造前”的默认值
-> 已不再有效。配套：`AUDIT.md`（现状审计 + 数据更正）、`PLAN.md`（原始计划）、
-> `API.md` / `api_index.json`（接口索引，自动生成）。
+配套：`AUDIT.md`（现状审计 + 数据更正）、`PLAN.md`（原始计划）、`API.md` / `api_index.json`（接口索引，自动生成）。
 
 ## 1. 语义没变
 

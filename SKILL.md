@@ -1,8 +1,6 @@
 ---
 name: video-studio
-description: Create finished videos from code and assets - motion graphics, explainers, long-form pieces, montages, and pixel art - rendered frame-exact in headless Chromium, assembled with ffmpeg, and verified by measurement. Interview first and write, generate, or render only after the user approves the full plan. Not for hand-editing footage in a GUI editor.
-metadata:
-  short-description: "Code-driven video: render, assemble, verify end to end"
+description: Produce finished videos from code and source assets - motion-graphics clips, explainers, 5-minute long-form, high-energy montages, pixel-art. Renders frame-exact scenes in headless Chromium, assembles them with ffmpeg, and verifies the result by measurement. Interview-first: it plans with the user, waits for explicit approval of the full plan, then writes once and renders once, previewing a still only when a specific doubt requires it. Use when the user wants a video created, restyled, or pipelined from a spec; not for hand-editing footage in a GUI editor.
 ---
 
 # Video Studio
@@ -42,7 +40,6 @@ Check the environment before any render or asset work (this can run while you in
 
 ```bash
 python <skill-dir>/scripts/vs.py doctor --install-ffmpeg
-python <skill-dir>/scripts/vs.py selftest        # end-to-end smoke test, a few seconds
 ```
 
 `--install-ffmpeg` vendors a full ffmpeg into the skill's `vendor/` folder. Playwright ships an
@@ -65,19 +62,12 @@ render time is spent.
    `python scripts/beat_audit.py project.json` fails on exit-then-enter gaps, over-long moves and
    weak overlaps - the three causes of a slide-deck feel
    ([references/rhythm-handoff.md](references/rhythm-handoff.md)).
-4. `check` the whole timeline. `preview` only when a specific doubt cannot be settled on paper:
-   one targeted frame that answers it, never a per-beat sweep. The default is to judge the still
-   frame from the plan.
-5. `plan` for the frame budget, then `run`: render straight into cached clips, assemble with
-   ffmpeg, verify by measurement. Frames are piped into ffmpeg's stdin; no PNG sequence ever
-   hits disk.
+4. `preview` only when a specific doubt cannot be settled on paper: one targeted frame that answers
+   it, never a per-beat sweep. The default is to judge the still frame from the plan.
+5. `run`: render each segment straight into a cached clip, assemble with ffmpeg, verify by
+   measurement. Frames are piped into ffmpeg's stdin; no PNG sequence ever hits disk.
 
 ## Commands
-
-Every command accepts `--json`, `--verbose` and `--quiet`; failures return
-`{code, where, expected, got, fix_hint}`.
-
-**Plan and prepare**
 
 | command | use it for |
 | --- | --- |
@@ -90,34 +80,13 @@ Every command accepts `--json`, `--verbose` and `--quiet`; failures return
 | `probe <files...>` | decide how to use an asset |
 | `sprite <image> [--width 64 --height 96 --colors 12]` | image to pixel-art sprite plus shadow |
 | `beats <audio> [--cuts 60]` | beat times and montage cut points |
-| `voices` | list installed speech voices |
-| `narrate <project> --script s.txt` | synthesize narration, time the take to it, write subtitles |
-| `montage <media-dir> --music m.mp3 --out p.json` | beat-cut montage from existing footage |
-| `libs [--install name...]` | list vendored browser libraries, or vendor one from npm (build-time only) |
 | `init <dir> [--duration N]` | scaffold one take: a spec plus the scene to write |
-
-**Render and deliver**
-
-| command | use it for |
-| --- | --- |
-| `plan <project>` | dry run: problems, cache hits, frame budget, estimated render time |
+| `libs [--install name...]` | list vendored browser libraries, or vendor one from npm (build-time only) |
 | `preview <project> [--segment id] [--at 2.0]` | one still frame, only for a doubt paper cannot settle |
-| `render <project> [--jobs N] [--slices N] [--force]` | render cached clips only |
+| `render <project> [--jobs N] [--force]` | render segments only (cached) |
 | `assemble <project> [--out f.mp4]` | cut, transition, mix, encode only |
-| `run <project> [--jobs N] [--slices N]` | all three, prints a JSON summary |
 | `verify <project>` | measured acceptance report |
-| `selftest [--keep]` | tiny project end to end, as a regression check |
-
-**Inspect and repair**
-
-| command | use it for |
-| --- | --- |
-| `check <project>` | pre-render timeline scan: ghost elements, out-of-frame text, NaN transforms, CJK/contrast |
-| `patch <edits.json>` | hash-checked multi-edit patcher with syntax checks and full rollback |
-| `audio [<project>] --cues cues.json` / `--check` | build or measure the audio bed against the mix target |
-| `card <dir>` | standalone closing card project |
-| `api [task]` | the CLI, library and injected-surface index, without reading source |
-| `cat <file> [--lines a:b]` / `diff <file>` | cached reads and changed-line ranges |
+| `run <project> [--jobs N]` | all three, prints a JSON summary |
 
 `run` and `verify` exit non-zero when a check fails. Read the failing `detail` - it names the knob to
 turn.
@@ -158,8 +127,6 @@ the only cost lever a single take has left.
 
 The multi-shot shape (`segments` + `timeline`, with `source` clips and xfade transitions) still
 exists for exactly one job: a montage of existing footage, which `vs.py montage` generates.
-Its per-segment `"still": true` flag is legacy - a single-take project rejects it, because it
-would freeze the whole take; use `hold` windows instead.
 
 ### Segment data
 
@@ -201,12 +168,18 @@ frame. Reach for one only when the effect cannot be written directly as a functi
 **There are no built-in templates.** The skeletons were deleted on purpose: every shot is a scene
 you write for this video, pointed at by `scene`. The renderer injects `Scene` / `Anim` / `Kit`, so
 a scene never resolves a path - it defines `window.seek(t)` and nothing else. `vs.py init --duration N`
-scaffolds one blank take (plumbing only, no design). How to compose a shot, the gates it has to
+scaffolds N blank ones (plumbing only, no design). How to compose a shot, the gates it has to
 pass, and the list of skeletons that are already used up:
 [references/choreography.md](references/choreography.md).
 
 ## Rules that keep output correct
 
+- **Talk first, get the plan approved, then create.** No spec, scene, image or render before the
+  user has approved the full plan (script + storyboard + visual direction + audio + checklist).
+- **One write, one render, one export.** The approved spec is written once; the full render happens
+  once and its output is the deliverable. Iterate on paper, never by re-rendering the piece.
+- **Preview only when necessary.** No per-beat still sweep as a design loop. One targeted `preview`
+  frame is allowed when a specific doubt cannot be resolved from the plan.
 - **One take, no cuts.** A project is one scene and one duration; the whole piece runs from t=0 to
   the end without a single cut. Change of scene is a transformation inside the shot, not an edit.
   Declare genuinely static stretches as `hold` windows - the renderer reuses one frame for them, and
@@ -215,14 +188,13 @@ pass, and the list of skeletons that are already used up:
   structure first, invent the mechanic from the subject's own physics, then write the scene. The
   old skeletons are deleted, not merely discouraged: a video assembled from a fixed set of them
   is the same video for every brief, and the second one wearing a used skeleton reads as
-  machine-made. Check the used-skeleton list before inventing, and add what you used:
-  [references/choreography.md](references/choreography.md).
+  machine-made. Check the used-
+  skeleton list before inventing, and add what you used: [references/choreography.md](references/choreography.md).
 - **The still frame is the design.** With motion stopped, the frame has to stand on its own. If it
   is a centred headline over a subtitle, the act of designing never happened - fix the structure,
   not the easing.
-- **Holds are free; `still` is not.** `hold` windows cost one frame each and are the lever for
-  talking-head and slide-like stretches of long videos. `"still": true` is the legacy per-segment
-  flag of the multi-shot/montage shape and is rejected by single-take projects.
+- **Held shots are free.** `"still": true` renders a single frame and holds it, so a 60s slide costs
+  the same as a 1s clip. Use it for talking-head and slide sections of long videos.
 - **Every animated value must be a pure function of `t`.** No CSS transitions, no
   `requestAnimationFrame`, no wall-clock time inside a scene.
 - **An external library is only usable if it can be driven from `t`, and only if its dist file
@@ -241,17 +213,38 @@ pass, and the list of skeletons that are already used up:
   [references/rhythm-handoff.md](references/rhythm-handoff.md).
 - **Always verify.** If a check fails, fix the spec, not the check.
 
+## Upgrades (read [UPGRADE.md](UPGRADE.md) first)
+
+New in this revision, all additive and all measured:
+
+- `--json` / `--verbose` / `--quiet` on every command; failures are
+  `{code, where, expected, got, fix_hint}` instead of a one-line string.
+- `vs.py api [task]` + `api_index.json` + [API.md](API.md): the CLI, every library function
+  and the injected `Scene`/`Anim`/`Kit` surface, without reading source.
+- `vs.py preview --report --at a,b,c`: multi-time numeric preview (ASCII map, 3x3 ink,
+  text boxes, contrast, type scale, dominant colours) - judge a frame without looking at it.
+- `vs.py check`: whole-timeline scan (ghost elements, out-of-frame text, NaN transforms)
+  plus CJK/contrast calibration, before spending render time.
+- `vs.py render --slices N --jobs M`: one take, one export, rendered across N parallel time
+  slices and joined losslessly (frame counts verified).
+- `vs.py patch`: hash-checked multi-edit patcher that refuses same-path delete+add, verifies
+  syntax and assertions, and rolls the whole batch back on failure.
+- `vs.py audio`: cue library + mix target, so UI sound is not re-synthesised per film.
+- `vs.py card`, `vs.py cat`, `vs.py diff`: closing card, cached reads, changed-line ranges.
+- Renderer defaults now: GPU rasterisation on, CDP fast (lossless) PNG, `--preset ultrafast`,
+  browser reboot every 90 frames at 4K. Measured 4K cost: 730 -> 166 ms/frame.
+
 ## Routing
 
 - Mechanics and failure modes - frame exactness, caching, the filter graph, alpha compositing,
   pixel-art maths, measured throughput, and every bug this tool has hit so far:
   [references/pipeline.md](references/pipeline.md).
-- 5-minute and longer videos - frame budgeting, render time, narration, subtitles, chapters, and
+- 5-minute and longer videos - segment budgeting, render time, narration, subtitles, chapters, and
   what to check before delivery: [references/longform.md](references/longform.md).
 - Recipes for montage, short-form, long-form, explainer and pixel styles, including beat-synced
   cutting and vertical framing: [references/formats.md](references/formats.md).
 - Chinese manual for the human operator: [README.md](README.md) (long form) and
-  [references/guide-zh.md](references/guide-zh.md) (one-page cheat sheet).
+[references/guide-zh.md](references/guide-zh.md) (one-page cheat sheet).
 - Planning, visual distinctiveness and generated imagery:
   [references/creative.md](references/creative.md).
 - Craft, from the animation/design tutorial canon - the twelve animation principles, the four
@@ -281,15 +274,3 @@ pass, and the list of skeletons that are already used up:
 - Fast lane and self-checks - `scripts/scaffold.py` builds a project from `assets/starter/`;
   `scripts/qc_video.py` measures region ink and prints ASCII frame maps; `scripts/taste_check.py`
   reports rhythm and composition; `scripts/beat_audit.py` audits the handoff timeline.
-
-## Tooling beyond the core
-
-`vs.py api [task]` indexes the CLI, every library function and the injected `Scene`/`Anim`/`Kit`
-surface, so an agent can call the tool without reading its source; [API.md](API.md) and
-[api_index.json](api_index.json) are the same data, regenerated by `scripts/api_index.py`.
-
-Recent additions and their measured effect - GPU/CDP rendering, time-sliced parallel renders,
-numeric preview reports, hash-checked patching, the audio cue library - are recorded in
-[UPGRADE.md](UPGRADE.md), with the audit that motivated them in [AUDIT.md](AUDIT.md) and
-[PLAN.md](PLAN.md). Those three are historical documents: where they disagree with this file,
-this file wins.
