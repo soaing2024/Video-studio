@@ -213,6 +213,27 @@ pass, and the list of skeletons that are already used up:
   [references/rhythm-handoff.md](references/rhythm-handoff.md).
 - **Always verify.** If a check fails, fix the spec, not the check.
 
+## Upgrades (read [UPGRADE.md](UPGRADE.md) first)
+
+New in this revision, all additive and all measured:
+
+- `--json` / `--verbose` / `--quiet` on every command; failures are
+  `{code, where, expected, got, fix_hint}` instead of a one-line string.
+- `vs.py api [task]` + `api_index.json` + [API.md](API.md): the CLI, every library function
+  and the injected `Scene`/`Anim`/`Kit` surface, without reading source.
+- `vs.py preview --report --at a,b,c`: multi-time numeric preview (ASCII map, 3x3 ink,
+  text boxes, contrast, type scale, dominant colours) - judge a frame without looking at it.
+- `vs.py check`: whole-timeline scan (ghost elements, out-of-frame text, NaN transforms)
+  plus CJK/contrast calibration, before spending render time.
+- `vs.py render --slices N --jobs M`: one take, one export, rendered across N parallel time
+  slices and joined losslessly (frame counts verified).
+- `vs.py patch`: hash-checked multi-edit patcher that refuses same-path delete+add, verifies
+  syntax and assertions, and rolls the whole batch back on failure.
+- `vs.py audio`: cue library + mix target, so UI sound is not re-synthesised per film.
+- `vs.py card`, `vs.py cat`, `vs.py diff`: closing card, cached reads, changed-line ranges.
+- Renderer defaults now: GPU rasterisation on, CDP fast (lossless) PNG, `--preset ultrafast`,
+  browser reboot every 90 frames at 4K. Measured 4K cost: 730 -> 166 ms/frame.
+
 ## Routing
 
 - Mechanics and failure modes - frame exactness, caching, the filter graph, alpha compositing,

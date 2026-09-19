@@ -1,0 +1,56 @@
+<!doctype html>
+<!-- A worked example of the director language: 6 seconds, one take, 43 lines of intent.
+     Not a template - a different subject (a deploy pipeline), written to show the verbs. -->
+<meta charset="utf-8">
+<style>html,body{margin:0;height:100%;overflow:hidden}*{box-sizing:border-box}</style>
+<div id="stage"></div>
+<script>
+const S = D.scene({ duration: 6, bg: "#f6f7fa" });
+
+S.cam([
+  [0.0, 960, 540,  120, 0.94],
+  [1.6, 960, 540,  360, 1.00, 0, "s1"],
+  [2.6, 940, 545, 1180, 1.26, 0, "s3"],     // dive into the pipeline
+  [3.4, 960, 540, 1560, 0.94, 0, "s2"],
+  [4.6, 900, 560, 1400, 0.88, 1.4, "s2"],
+  [6.0, 960, 540, 1520, 0.92, 0, "s1"],
+], { hits: [[1.65, 0.6], [2.62, 1.5], [3.35, 0.8], [4.55, 1.6], [5.2, 0.5]] });
+
+// --- the pipeline window: one panel, three rows, a chart, a progress bar
+const win = S.panel("pipeline", { box: [900, 540], pos: [960, 540], z: 2200,
+                                  at: "1.55:0 s6 1.8:1 5.4:1 5.7:0 in" });
+S.rows(win, 4, { x: 34, y: 76, gap: 34, w: 260 });
+S.chart(win, { x: 360, y: 96, w: 500, h: 150, bars: 18, gap: 26, bw: 13 });
+S.rows(win, 3, { x: 360, y: 300, gap: 26, w: 480, dot: false });
+const prog = S.bar(win, [34, 470, 820, 8], { c: "rgba(15,23,42,.08)", r: 4 });
+S.el("fill", { parent: win, box: [820, 8], pos: [444, 474], z: 2200,
+               style: { background: "linear-gradient(90deg,#0b0f14,#1f6bff)", borderRadius: "4px" },
+               sx: "0:.02 s2 5.2:1 s1" });
+
+// --- the label that becomes the card: same element, morphed
+const chip = S.text("chip", "Deploy", { size: 26, pos: [960, 880], z: 3000, weight: "600",
+                                        at: "0:0 s6 0.2:1" });
+S.morph(chip, { t: 0.2, from: [150, 44], box: [150, 44], dur: 0.5 });
+
+// --- a code line that types itself, then gets swallowed by the dive
+const code = S.text("code", "", { size: 30, mono: true, pos: [960, 620], z: 2300,
+                                  at: "2.0:0 s6 2.15:1 2.6:1 2.72:0 in" });
+code.textContent = "pipeline.build()";
+
+// --- hand-offs, in the vocabulary of the language
+S.hit(1.42, 0.8);                      // the window lands
+S.fx.wave(2.62, [940, 545, 2200], { r: 2600 });   // the dive impact
+
+const card = S.panel("card", { box: [560, 320], pos: [960, 540], z: 2600, radius: 20,
+                               at: "3.35:0 s6 3.55:1 5.3:1 5.6:0 in" });
+S.rows(card, 2, { x: 30, y: 70, gap: 26, w: 380 });
+S.chart(card, { x: 30, y: 130, w: 500, h: 110, bars: 14, gap: 34, bw: 16 });
+const star = S.text("star", "Star it.", { size: 76, pos: [960, 540], z: 2620,
+                                          at: "4.5:0 s6 4.7:1" });
+S.morph(star, { t: 4.7, from: [40, 40], box: [420, 90], dur: 0.7 });
+
+S.fx.burst(4.95, [960, 540, 2620], { n: 190, color: "31,107,255" });   // particles + rings
+S.fx.hud([960, 540, 620, 380], { z: 2600, from: 3.6, until: 5.2, a: 0.5 });
+
+S.collect({ t: 5.65, dur: 0.9, to: [960, 540, 2680], keep: [] });      // everything folds in
+</script>

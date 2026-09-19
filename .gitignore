@@ -4,6 +4,11 @@ out/
 dist/
 *.log
 
+# 工具自己的备份与缓存（apply_patch.py / fmt.read_cached 会生成）
+*.bak
+.vs_cache/
+*.vstmp
+
 # 自动下载的 ffmpeg（84MB，且是 GPL 构建）
 # 首次使用运行 `vs.py doctor --install-ffmpeg` 会自动装回来
 vendor/

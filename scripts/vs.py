@@ -35,6 +35,8 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 from lib import (  # noqa: E402
+    analyze,
+    fmt,
     assemble, beats, brief as brief_mod, choreography, imagegen, libs, montage, motion,
     narrate, probe, render, runtime, sprite, spec as specmod, style, tts, verify,
 )
@@ -319,7 +321,9 @@ def cmd_style(args) -> int:
 def cmd_render(args) -> int:
     spec = spec_from(args)
     ffmpeg, node = _ffmpeg(), runtime.find_node()
-    results = render.render_all(spec, ffmpeg, node, jobs=args.jobs, force=args.force)
+    results = render.render_all(spec, ffmpeg, node, jobs=args.jobs, force=args.force,
+                                slices=getattr(args, "slices", None),
+                                incremental=getattr(args, "incremental", None), log=fmt.note)
     emit({"segments": results, "build_dir": str(render.build_dir(spec))})
     return 0
 
@@ -369,7 +373,9 @@ def cmd_run(args) -> int:
     ffmpeg, node = _ffmpeg(), runtime.find_node()
     log = (lambda m: print(m, file=sys.stderr)) if args.quiet else (lambda m: print(m, file=sys.stderr))
     print(f"[1/3] render {len(render.pending(spec))} segment(s)", file=sys.stderr)
-    render.render_all(spec, ffmpeg, node, jobs=args.jobs, force=args.force, log=log)
+    render.render_all(spec, ffmpeg, node, jobs=args.jobs, force=args.force, log=log,
+                       slices=getattr(args, "slices", None),
+                       incremental=getattr(args, "incremental", None))
     print("[2/3] assemble", file=sys.stderr)
     result = assemble.assemble(spec, ffmpeg, log=log)
     summary = {"output": result["output"], "duration": result["duration"]}
@@ -694,16 +700,239 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _cmd_preview_dispatch(args) -> int:
+    """--report turns a still into a judgement: numbers, not an image to look at."""
+    if not getattr(args, "report", False):
+        return _cmd_preview_orig(args)
+    spec = spec_from(args)
+    ffmpeg, node = runtime.find_ffmpeg(), runtime.find_node()
+    seg = specmod.segment_map(spec).get(args.segment) if args.segment else spec["segments"][0]
+    times = [float(x) for x in str(args.at or "0").split(",") if x.strip()]
+    out_dir = render.build_dir(spec) / "preview"
+    rows = render.probe_frames(spec, seg, ffmpeg, node, times, out_dir,
+                               w=int(getattr(args, "width", 0) or 0) or None,
+                               h=int(getattr(args, "height", 0) or 0) or None)
+    rep = analyze.merge(rows, ascii_cols=int(getattr(args, "ascii", 96) or 96))
+    rep["which"] = "preview"
+    (out_dir / "report.json").write_text(json.dumps(rep, ensure_ascii=False, indent=1),
+                                         encoding="utf-8")
+    fmt.emit(rep, human=analyze.human(rep, ascii_for=times[0] if getattr(args, "ascii_map", False) else None)
+             + f"\nreport: {out_dir / 'report.json'}")
+    return 0 if rep["ok"] else 1
+
+
+def _cmd_plan_v2(args) -> int:
+    """Budget before render: estimated wall clock, memory-safe concurrency, fallbacks."""
+    spec = spec_from(args)
+    issues = specmod.validate(spec)
+    w, h, _ = render.work_size(spec)
+    frames = int(round(float(spec["duration"]) * spec["video"]["fps"]))
+    slices = int(getattr(args, "slices", 1) or 1)
+    jobs = render.safe_jobs(w, h, int(getattr(args, "jobs", 0) or spec["render"].get("jobs", 2)),
+                            log=fmt.note)
+    per = render.frame_cost_ms(spec, w, h)
+    gb = render.free_gb()
+    cached = 0
+    for seg in render.pending(spec):
+        key = seg and Path(str(render.segment_path(spec, seg["id"]))).with_suffix(".key")
+        if key.is_file():
+            cached += 1
+    wall = frames * per / 1000 / max(1, min(jobs, slices))
+    advice = []
+    if per > 60 and render.png_kind(spec) == "png":
+        advice.append("use the default fast PNG (drop --png-compression default): -75% per frame")
+    if slices <= 1 and specmod.planned_duration(spec) > 3:
+        advice.append(f"add --slices {min(8, max(2, jobs * 2))} --jobs {jobs}: "
+                      f"a single take renders in one process otherwise")
+    if gb is not None and gb < 4 and jobs > 2:
+        advice.append(f"only {gb:.1f} GB free: keep --jobs <= 2, x264 buffers ~12 MB/frame at 4K")
+    out = {"ok": not [i for i in issues if i["level"] == "error"], "which": "plan",
+           "frames": frames, "size": [w, h], "png_kind": render.png_kind(spec),
+           "ms_per_frame": round(per), "slices": slices, "jobs": jobs, "free_gb": gb,
+           "est_wall_min": round(wall / 60, 1), "cached_segments": cached,
+           "issues": issues, "advice": advice}
+    fmt.emit(out, human=f"plan: {frames} frames @ {w}x{h} ({render.png_kind(spec)}, "
+                        f"{round(per)} ms/frame) -> ~{out['est_wall_min']} min "
+                        f"with {jobs} job(s) x {slices} slice(s)"
+                        + (f"; {len(advice)} suggestion(s)" if advice else ""))
+    if advice and not fmt.is_json():
+        for a in advice:
+            print("  -> " + a)
+    return 0 if out["ok"] else 2
+
+
+def _inject_common(parser):
+    """--json/--verbose everywhere, plus the new subcommands, without touching build_parser."""
+    import argparse as _ap
+    subs = [a for a in parser._actions if isinstance(a, _ap._SubParsersAction)]
+    if not subs:
+        return
+    choices = subs[0].choices
+    for name, sp in choices.items():
+        for flag, kw in (("--json", dict(action="store_true", help="one compact JSON object")),
+                         ("--verbose", dict(action="store_true", help="full logs")),
+                         ("--quiet", dict(action="store_true", help="errors only")),
+                         ("--limit", dict(type=int, default=20, help="truncation lines (head/tail)"))):
+            if not any(flag in a.option_strings for a in sp._actions):
+                sp.add_argument(flag, **kw)
+    for name in ("render", "run", "plan"):
+        if name not in choices:
+            continue
+        sp = choices[name]
+        for flag, fkw in (("--slices", dict(type=int, default=1,
+                                            help="split ONE take into N parallel time slices (same single export)")),
+                          ("--jobs", dict(type=int, default=0, help="parallel workers")),
+                          ("--preset", dict(default=None,
+                                            help="x264 preset for intermediates (default ultrafast)")),
+                          ("--jpeg", dict(type=int, default=None,
+                                          help="lossy intermediate frames, preflight only")),
+                          ("--reboot", dict(type=int, default=0,
+                                            help="restart the browser every N frames")),
+                          ("--incremental", dict(action="store_true",
+                                                  help="re-render only the frames whose state changed")),
+                          ("--no-gpu", dict(dest="no_gpu", action="store_true",
+                                            help="do not ask Chromium for GPU rasterisation"))):
+            if not any(flag in a.option_strings for a in sp._actions):
+                sp.add_argument(flag, **fkw)
+    if "plan" in choices:
+        choices["plan"].set_defaults(func=_cmd_plan_v2)
+    if "preview" in choices:
+        pv = choices["preview"]
+        pv.add_argument("--report", action="store_true", help="numbers instead of an image")
+        for act in pv._actions:            # the existing --at is a float: accept a list instead
+            if "--at" in act.option_strings:
+                act.type = str
+                act.help = "comma-separated seconds, e.g. 2.75,7.9,24.7"
+        pv.add_argument("--ascii", type=int, default=96, help="ASCII map columns (0 disables)")
+        pv.add_argument("--ascii-map", action="store_true", help="print the map in human output")
+        globals()["_cmd_preview_orig"] = pv.get_default("func")
+        pv.set_defaults(func=_cmd_preview_dispatch)
+
+    def _add(name, help_, func, **kw):
+        if name in choices:
+            return
+        sp = subs[0].add_parser(name, help=help_)
+        for flag, fkw in (("--json", dict(action="store_true")), ("--verbose", dict(action="store_true")),
+                          ("--quiet", dict(action="store_true")), ("--limit", dict(type=int, default=20))):
+            sp.add_argument(flag, **fkw)
+        for a, fkw in kw.items():
+            sp.add_argument(a, **fkw)
+        sp.set_defaults(func=func)
+
+    def cmd_check(args):
+        import subprocess as _sp
+        cmd = [sys.executable, str(HERE / "scene_check.py"), args.project, "--json" if fmt.is_json() else ""]
+        cmd += ["--stride", str(args.stride)]
+        r = _sp.run([c for c in cmd if c], capture_output=True, text=True, encoding="utf-8",
+                    errors="replace")
+        sys.stdout.write(r.stdout)
+        if r.returncode not in (0, 1):
+            return fmt.report_error(fmt.fail("CHECK_FAILED", args.project, "scene_check runs",
+                                            r.stderr.strip()[-200:],
+                                            "python scripts/scene_check.py " + args.project))
+        return r.returncode
+
+    def cmd_patch(args):
+        import subprocess as _sp
+        cmd = [sys.executable, str(HERE / "apply_patch.py"), args.edits]
+        if args.json:
+            cmd.append("--json")
+        r = _sp.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        sys.stdout.write(r.stdout)
+        sys.stderr.write(r.stderr)
+        return r.returncode
+
+    def cmd_audio(args):
+        from lib import audio as _audio
+        if args.check:
+            return _audio.main(["--check", args.check] + (["--json"] if fmt.is_json() else []))
+        src = args.cues or args.project
+        cues = (str(Path(src) / "cues.json") if src and Path(src).is_dir() else src)
+        return _audio.main([cues or "-", "--out", args.out or "audio/mix.wav",
+                            "--duration", str(args.duration)] + (["--json"] if fmt.is_json() else []))
+
+    def cmd_card(args):
+        from lib import deliver as _deliver
+        res = _deliver.closing_card(Path(args.out), title=args.title, cn=args.cn,
+                                    accent=args.accent or "#1f6bff")
+        fmt.emit(res, human=f"card project -> {res['project']}")
+        return 0
+
+    def cmd_api(args):
+        idx = json.loads((HERE.parent / "api_index.json").read_text(encoding="utf-8"))             if (HERE.parent / "api_index.json").is_file() else None
+        if idx is None:
+            return fmt.report_error(fmt.fail("NO_INDEX", "api_index.json", "generated index",
+                                             "missing",
+                                             "run: python scripts/api_index.py"))
+        task = args.task
+        if task:
+            hit = next((c for c in idx["commands"] if c["name"] == task), None)
+            fmt.emit({"ok": bool(hit), "which": "api", "command": hit},
+                     human=json.dumps(hit, ensure_ascii=False, indent=1)[:1500] if hit else f"no such command: {task}")
+            return 0 if hit else 2
+        fmt.emit({"ok": True, "which": "api", "commands": [c["name"] for c in idx["commands"]],
+                  "index": str(HERE.parent / "api_index.json")},
+                 human=" ".join(c["name"] for c in idx["commands"]))
+        return 0
+
+    def cmd_cat(args):
+        text = fmt.read_cached(args.file, Path(args.cache_dir) if args.cache_dir else None)
+        rng = args.lines
+        if rng:
+            a, b = (rng.split(":") + [""])[:2]
+            lo = int(a or 1)
+            hi = int(b) if b else lo + 60
+            text = "\n".join(f"{i + 1:>5}| {l}" for i, l in enumerate(text.splitlines()[lo - 1:hi], lo - 1))
+        fmt.emit({"ok": True, "which": "cat", "file": args.file,
+                  "bytes": len(text.encode()), "lines": text.count("\n") + 1},
+                 human=text if not fmt.is_json() else text)
+        return 0
+
+    def cmd_diff(args):
+        fmt.emit({"ok": True, "which": "diff", **fmt.diff_lines(args.file)},
+                 human=json.dumps(fmt.diff_lines(args.file), ensure_ascii=False)[:1200])
+        return 0
+
+    _add("check", "pre-render self-check: timeline scan + typography calibration", cmd_check,
+         **{"project": {}, "--stride": dict(type=float, default=0.25)})
+    _add("patch", "hash-checked multi-edit patcher", cmd_patch, **{"edits": {}})
+    _add("audio", "build or check the audio bed", cmd_audio,
+         **{"project": dict(nargs="?", default=None), "--cues": dict(default=None),
+            "--out": dict(default=None), "--duration": dict(type=float, default=30.0),
+            "--check": dict(default=None)})
+    _add("card", "generate a standalone closing card project", cmd_card,
+         **{"out": {}, "--title": dict(default="Star it."), "--cn": dict(default="去点亮 Star"),
+            "--accent": dict(default=None)})
+    _add("api", "introspect the skill without reading its source", cmd_api,
+         **{"task": dict(nargs="?", default=None)})
+    _add("cat", "read a file through the session cache (optionally a line range)", cmd_cat,
+         **{"file": {}, "--lines": dict(default=None), "--cache-dir": dict(default=None)})
+    _add("diff", "which line ranges changed since the last read", cmd_diff, **{"file": {}})
+
+
 def main(argv=None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    try:
+        _inject_common(parser)
+    except Exception as e:      # never let the convenience layer break the CLI
+        fmt.warn(f"command surface injection skipped: {e}")
+    args = parser.parse_args(argv)
+    fmt.configure(json=getattr(args, "json", False), verbose=getattr(args, "verbose", False),
+                  quiet=getattr(args, "quiet", False), limit=getattr(args, "limit", 20))
     try:
         return args.func(args)
+    except fmt.VsError as e:
+        return fmt.report_error(e)
     except (runtime.ToolError, specmod.SpecError) as e:
-        print(f"error: {e}", file=sys.stderr)
-        return 2
+        return fmt.report_error(fmt.fail(type(e).__name__, "project", "a valid project / environment",
+                                         str(e)[:300],
+                                         "vs.py doctor --install-ffmpeg checks the runtime; "
+                                         "vs.py plan <project> lists spec problems"))
     except Exception as e:  # keep the CLI honest instead of dumping a traceback
-        print(f"error: {type(e).__name__}: {e}", file=sys.stderr)
-        return 1
+        return fmt.report_error(fmt.fail(type(e).__name__, "vs.py",
+                                         "a handled failure", f"{e}"[:300],
+                                         "re-run with --verbose for the traceback",
+                                         __import__("traceback").format_exc() if getattr(args, "verbose", False) else ""))
 
 
 if __name__ == "__main__":
