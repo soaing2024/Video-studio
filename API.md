@@ -29,7 +29,7 @@ vs.py preview work/mine/project.json --at 2.75,7.9 --report
 vs.py preview work/mine/project.json --at 12.9 --report --ascii 90
 ```
 
-### scene_check — 
+### check — 
 
 ```bash
 vs.py check work/mine/project.json --json
@@ -44,7 +44,7 @@ vs.py plan work/mine/project.json --json
 ### render — 
 
 ```bash
-vs.py render work/mine/project.json --slices 8 --jobs 4 --gpu
+vs.py render work/mine/project.json --slices 8 --jobs 4
 vs.py render work/mine/project.json --incremental --json
 ```
 
@@ -63,7 +63,7 @@ vs.py verify work/mine/project.json --video outputs/film.mp4 --json
 ### run — 
 
 ```bash
-vs.py run work/mine/project.json --slices 8 --jobs 4 --gpu --json
+vs.py run work/mine/project.json --slices 8 --jobs 4 --json
 ```
 
 ### init — 
@@ -75,7 +75,7 @@ vs.py init work/mine --duration 30
 ### patch — 
 
 ```bash
-vs.py patch work/mine/project.json --set video.fps=60
+vs.py patch edits.json
 python scripts/apply_patch.py edits.json --json
 ```
 
@@ -96,7 +96,7 @@ vs.py card work/mine --title 'Star it.' --cn '去点亮 Star'
 
 ```bash
 python scripts/api_index.py
-vs.py api --task preview
+vs.py api preview
 ```
 
 ## 场景里可用的注入 API
@@ -104,7 +104,7 @@ vs.py api --task preview
 - `Scene`: ``
 - `Anim`: ``
 - `Kit`: ``
-- `flags`: `crf`, `data`, `duration`, `ffmpeg`, `fps`, `gpu`, `height`, `hold`, `jpeg`, `out`, `preset`, `probe`, `progress`, `ready_timeout`, `reboot`, `runtimes`, `scene`, `still`, `url`, `width`
+- `flags`: `crf`, `data`, `duration`, `ffmpeg`, `fps`, `gpu`, `height`, `hold`, `jpeg`, `out`, `preset`, `probe`, `progress`, `ready_timeout`, `reboot`, `runtimes`, `scene`, `sig`, `still`, `url`, `width`
 
 ## 命令一览
 
@@ -116,11 +116,11 @@ vs.py api --task preview
 | `sprite` |  | `--out`, `--width`, `--height`, `--colors`, `--alpha-cutoff`, `--verbose`, `--quiet`, `--limit` |
 | `beats` |  | `--sensitivity`, `--min-gap`, `--cuts`, `--min-len`, `--verbose`, `--quiet`, `--limit` |
 | `init` |  | `--name`, `--duration`, `--verbose`, `--quiet`, `--limit` |
-| `render` |  | `--jobs`, `--force`, `--seed`, `--verbose`, `--quiet`, `--limit`, `--slices`, `--preset`, `--jpeg`, `--reboot`, `--no-gpu` |
+| `render` |  | `--jobs`, `--force`, `--seed`, `--verbose`, `--quiet`, `--limit`, `--slices`, `--preset`, `--jpeg`, `--reboot`, `--incremental`, `--no-gpu` |
 | `assemble` |  | `--out`, `--verbose`, `--quiet`, `--limit` |
 | `verify` |  | `--video`, `--samples`, `--verbose`, `--quiet`, `--limit` |
 | `preview` |  | `--segment`, `--at`, `--seed`, `--out`, `--verbose`, `--quiet`, `--limit`, `--report`, `--ascii`, `--ascii-map` |
-| `run` |  | `--jobs`, `--force`, `--skip-verify`, `--samples`, `--quiet`, `--seed`, `--verbose`, `--limit`, `--slices`, `--preset`, `--jpeg`, `--reboot`, `--no-gp |
+| `run` |  | `--jobs`, `--force`, `--skip-verify`, `--samples`, `--quiet`, `--seed`, `--verbose`, `--limit`, `--slices`, `--preset`, `--jpeg`, `--reboot`, `--incre |
 | `style` |  | `--seed`, `--topic`, `--swatch`, `--like`, `--history`, `--verbose`, `--quiet`, `--limit` |
 | `setup` |  | `--provider`, `--key`, `--base-url`, `--model`, `--size`, `--path`, `--presets`, `--test`, `--verbose`, `--quiet`, `--limit` |
 | `brief` |  | `--script`, `--topic`, `--out`, `--name`, `--beats`, `--duration`, `--platform`, `--tone`, `--audience`, `--seed`, `--music`, `--voice`, `--image-size |
@@ -129,7 +129,7 @@ vs.py api --task preview
 | `voices` |  | `--verbose`, `--quiet`, `--limit` |
 | `narrate` |  | `--script`, `--voice`, `--rate`, `--force`, `--verbose`, `--quiet`, `--limit` |
 | `montage` |  | `--music`, `--out`, `--duration`, `--style`, `--title`, `--width`, `--height`, `--fps`, `--verbose`, `--quiet`, `--limit` |
-| `plan` |  | `--seed`, `--verbose`, `--quiet`, `--limit`, `--slices`, `--jobs`, `--preset`, `--jpeg`, `--reboot`, `--no-gpu` |
+| `plan` |  | `--seed`, `--verbose`, `--quiet`, `--limit`, `--slices`, `--jobs`, `--preset`, `--jpeg`, `--reboot`, `--incremental`, `--no-gpu` |
 | `selftest` |  | `--jobs`, `--keep`, `--verbose`, `--quiet`, `--limit` |
 | `check` |  | `--verbose`, `--quiet`, `--limit`, `--stride` |
 | `patch` |  | `--verbose`, `--quiet`, `--limit` |
