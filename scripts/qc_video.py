@@ -24,17 +24,24 @@ import sys
 import tempfile
 from pathlib import Path
 
-VENDORED = Path(__file__).resolve().parent.parent / "vendor" / "ffmpeg-win-x86_64-v7.1.exe"
 BLANK_INK = 200
 
 
 def ffmpeg_path() -> str:
-    if VENDORED.is_file():
-        return str(VENDORED)
-    found = shutil.which("ffmpeg")
-    if not found:
-        raise SystemExit("error: no ffmpeg found (checked the video-studio vendor folder and PATH)")
-    return found
+    """The skill's runtime resolver, with a PATH fallback for standalone use.
+
+    Hardcoding the win-x86_64 filename silently fell back to PATH on any other build, which is
+    where the Playwright ffmpeg (VP8/PNG only) lives.
+    """
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from lib import runtime
+        return runtime.find_ffmpeg()
+    except Exception:
+        found = shutil.which("ffmpeg")
+        if not found:
+            raise SystemExit("error: no ffmpeg found (checked the skill vendor folder and PATH)")
+        return found
 
 
 def parse_regions(raw: str | None) -> dict[str, tuple[int, int, int, int]]:

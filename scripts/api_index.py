@@ -37,19 +37,17 @@ EXAMPLES = {
                 "vs.py preview work/mine/project.json --at 12.9 --report --ascii 90"],
     "check": ["vs.py check work/mine/project.json --json"],
     "plan": ["vs.py plan work/mine/project.json --json"],
-    "render": ["vs.py render work/mine/project.json --slices 8 --jobs 4",
+    "render": ["vs.py render work/mine/project.json --jobs 4",
                "vs.py render work/mine/project.json --incremental --json"],
     "assemble": ["vs.py assemble work/mine/project.json --out outputs/film.mp4"],
     "verify": ["vs.py verify work/mine/project.json --video outputs/film.mp4 --json"],
-    "run": ["vs.py run work/mine/project.json --slices 8 --jobs 4 --json"],
+    "run": ["vs.py run work/mine/project.json --jobs 4 --json"],
     "init": ["vs.py init work/mine --duration 30"],
     "patch": ["vs.py patch edits.json", "python scripts/apply_patch.py edits.json --json"],
     "audio": ["vs.py audio work/mine --cues cues.json",
               "vs.py audio work/mine --check"],
     "card": ["vs.py card work/mine --title 'Star it.' --cn '去点亮 Star'"],
     "api": ["python scripts/api_index.py", "vs.py api preview"],
-    "shots": ['vs.py shots "这一拍要让观众明白什么"',
-              "vs.py shots --brief brief.json --beat 2 --json"],
     "sfx": ['vs.py sfx "whoosh transition" --top 8',
             "vs.py sfx --get 12345 --out assets/sfx --name whoosh-01"],
 }
@@ -84,19 +82,28 @@ def py_surface(path: Path) -> list[dict]:
     return out
 
 
+JS_GLOBALS = ("Scene", "Anim", "Phys", "Look", "Kit", "D")
+
+
 def js_surface(path: Path) -> dict:
+    """The keys each injected global exposes, as a scene author sees them.
+
+    Two shapes have to be handled: `global.Kit = { shorthand, names }` (ES6 shorthand has no
+    colon, which the old `":" in x` filter dropped - every generated surface came back empty)
+    and `global.Scene.three = view` (three-kit.js adds members to a global scene.js created).
+    """
     src = path.read_text(encoding="utf-8", errors="replace")
-    out = {}
-    for key in ("Scene", "Anim", "Kit"):
-        m = re.search(r"global\." + key + r"\s*=\s*\{(.*?)\n\s*\};", src, re.S)
-        if not m:
-            m = re.search(r"global\." + key + r"\s*=\s*\{([^}]*)\}", src, re.S)
-        if not m:
-            continue
-        keys = [x.strip().split(":")[0].strip().split("(")[0].strip()
-                for x in m.group(1).split(",") if x.strip() and ":" in x]
-        out[key] = sorted(set(k for k in keys if k and re.match(r"^\w+$", k)))
-    return out
+    out: dict[str, list[str]] = {}
+    for key in JS_GLOBALS:
+        m = re.search(r"global\." + key + r"\s*=\s*\{([^}]*)\}", src, re.S)
+        if m:
+            for chunk in m.group(1).split(","):
+                token = chunk.strip().split(":")[0].split("(")[0].strip()
+                if token and re.match(r"^\w+$", token):
+                    out.setdefault(key, []).append(token)
+        for member in re.findall(r"global\." + key + r"\.(\w+)\s*=", src):
+            out.setdefault(key, []).append(member)
+    return {k: sorted(set(v)) for k, v in out.items()}
 
 
 def command_table() -> list[dict]:
@@ -141,13 +148,12 @@ def main() -> int:
         if fns:
             py[rel] = fns
 
-    js = {}
-    for n in ("scene.js", "anim.js", "phys.js", "kit.js", "three-kit.js", "director.js"):
+    js: dict = {}
+    for n in ("scene.js", "anim.js", "phys.js", "look.js", "kit.js", "three-kit.js", "director.js"):
         p = SKILL / "assets" / "runtime" / n
         if p.is_file():
-            s = js_surface(p)
-            if s:
-                js[n] = s
+            for key, keys in js_surface(p).items():
+                js[key] = sorted(set(js.get(key, []) + keys))
     js["render_segment.mjs"] = render_flags()
 
     index = {
@@ -189,7 +195,8 @@ def main() -> int:
 def render_flags() -> dict:
     """The renderer's own flags (it is a script, so there is no parser to introspect)."""
     src = (SKILL / "scripts" / "render_segment.mjs").read_text(encoding="utf-8", errors="replace")
-    flags = sorted(set(re.findall(r'a\.(\w+)', src)))
+    # `(?<![\w.])` keeps `import.meta.url` from being read as an `--url` flag.
+    flags = sorted(set(re.findall(r"(?<![\w.])a\.(\w+)", src)))
     return {"flags": flags}
 
 
@@ -229,11 +236,13 @@ def write_api_md(index: dict) -> None:
         "",
     ]
     for lib, surface in index["browser_runtime"].items():
-        if isinstance(surface, dict) and surface and all(isinstance(v, list) for v in surface.values()):
+        if isinstance(surface, dict) and "flags" in surface:
+            lines.append(f"- `{lib}` flags: `{'`, `'.join('--' + f for f in surface['flags'])}`")
+        elif isinstance(surface, list):
+            lines.append(f"- `{lib}`: `{'`, `'.join(surface)}`")
+        elif isinstance(surface, dict):
             for k, keys in surface.items():
                 lines.append(f"- `{k}`: `{'`, `'.join(keys)}`")
-        elif isinstance(surface, dict) and "flags" in surface:
-            lines.append(f"- `{lib}` flags: `{'`, `--'.join(surface['flags'])}`")
     lines += [
         "",
         "## 命令一览",

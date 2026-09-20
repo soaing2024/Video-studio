@@ -44,7 +44,7 @@ vs.py plan work/mine/project.json --json
 ### render — 
 
 ```bash
-vs.py render work/mine/project.json --slices 8 --jobs 4
+vs.py render work/mine/project.json --jobs 4
 vs.py render work/mine/project.json --incremental --json
 ```
 
@@ -63,7 +63,7 @@ vs.py verify work/mine/project.json --video outputs/film.mp4 --json
 ### run — 
 
 ```bash
-vs.py run work/mine/project.json --slices 8 --jobs 4 --json
+vs.py run work/mine/project.json --jobs 4 --json
 ```
 
 ### init — 
@@ -99,13 +99,6 @@ python scripts/api_index.py
 vs.py api preview
 ```
 
-### shots — 
-
-```bash
-vs.py shots "这一拍要让观众明白什么"
-vs.py shots --brief brief.json --beat 2 --json
-```
-
 ### sfx — 
 
 ```bash
@@ -115,10 +108,13 @@ vs.py sfx --get 12345 --out assets/sfx --name whoosh-01
 
 ## 场景里可用的注入 API
 
-- `Scene`: ``
-- `Anim`: ``
-- `Kit`: ``
-- `flags`: `crf`, `data`, `debug`, `duration`, `ffmpeg`, `fps`, `gpu`, `height`, `hold`, `jpeg`, `offset`, `out`, `preset`, `probe`, `progress`, `ready_timeout`, `reboot`, `runtimes`, `scale`, `scene`, `sig`, `still`, `url`, `width`
+- `Scene`: `SAFE`, `css3d`, `icon`, `iconNames`, `mount`, `ready`, `safe`, `surface`, `three`, `type`
+- `Anim`: `Actor`, `EASE`, `Scene`, `clamp01`, `lottie`, `mixColor`, `spring`, `timeline`
+- `Phys`: `BAKED_DT`, `bake`, `ballistic`, `chain`, `clamp01`, `drag`, `handheld`, `list`, `noise`, `pendulum`, `rng`, `spring`
+- `Look`: `depth`, `draw`, `field`, `hierarchy`, `rgb`, `sprite`, `weave`
+- `Kit`: `ambient`, `backdrop`, `bandSwapper`, `buildStage`, `clamp01`, `drawParticles`, `el`, `makeCamera`, `rgba`, `rng`, `seedParticles`, `splitWords`, `textureCss`
+- `D`: `E`, `parse`, `scene`, `spr`, `track`
+- `render_segment.mjs` flags: `--crf`, `--data`, `--debug`, `--duration`, `--ffmpeg`, `--fps`, `--gpu`, `--height`, `--hold`, `--jpeg`, `--offset`, `--out`, `--preset`, `--probe`, `--progress`, `--ready_timeout`, `--reboot`, `--runtimes`, `--scale`, `--scene`, `--sig`, `--still`, `--width`
 
 ## 命令一览
 
@@ -130,7 +126,6 @@ vs.py sfx --get 12345 --out assets/sfx --name whoosh-01
 | `sprite` |  | `--out`, `--width`, `--height`, `--colors`, `--alpha-cutoff`, `--verbose`, `--quiet`, `--limit` |
 | `beats` |  | `--sensitivity`, `--min-gap`, `--cuts`, `--min-len`, `--verbose`, `--quiet`, `--limit` |
 | `sfx` |  | `--get`, `--token`, `--access-token`, `--test`, `--licence`, `--top`, `--sort`, `--min-dur`, `--max-dur`, `--out`, `--name`, `--quality`, `--kind`, `- |
-| `shots` |  | `--brief`, `--beat`, `--count`, `--seed`, `--duration`, `--verbose`, `--quiet`, `--limit` |
 | `init` |  | `--name`, `--duration`, `--verbose`, `--quiet`, `--limit` |
 | `render` |  | `--jobs`, `--force`, `--seed`, `--verbose`, `--quiet`, `--limit`, `--slices`, `--preset`, `--jpeg`, `--reboot`, `--incremental`, `--no-gpu` |
 | `assemble` |  | `--out`, `--verbose`, `--quiet`, `--limit` |

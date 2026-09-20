@@ -42,14 +42,24 @@ def contrast(fg, bg) -> float:
     return round((hi + 0.05) / (lo + 0.05), 2)
 
 
-def frame_stats(png: str | Path, ascii_cols: int = 96, rows: int = 0) -> dict:
-    """Brightness, ink budget, 3x3 density, dominant colours and an ASCII map."""
+def frame_stats(png: str | Path, ascii_cols: int = 96, rows: int = 0,
+                polarity: str = "auto") -> dict:
+    """Brightness, ink budget, 3x3 density, dominant colours and an ASCII map.
+
+    `polarity` decides which side of the canvas counts as drawn material: "auto" reads it off
+    the frame itself. A dark film is not 100% ink, and judging it by the light-canvas rule made
+    the empty-frame check impossible to trigger on dark projects.
+    """
     from PIL import Image
     import numpy as np
     im = Image.open(png).convert("RGB")
     arr = np.asarray(im, dtype=np.uint8)
     grey = np.asarray(im.convert("L"), dtype=np.uint8)
     h, w = grey.shape
+    canvas = float(np.median(grey))
+    pol = polarity if polarity in ("light", "dark") else ("light" if canvas >= 127 else "dark")
+    drawn = (grey < 245) if pol == "light" else (grey > (canvas + 20))
+    drawn_pct = round(float(drawn.mean()) * 100, 2)
     ink = {
         "lt_245": round(float((grey < 245).mean()) * 100, 2),
         "lt_225": round(float((grey < 225).mean()) * 100, 2),
@@ -67,6 +77,9 @@ def frame_stats(png: str | Path, ascii_cols: int = 96, rows: int = 0) -> dict:
     px = np.asarray(small.convert("L"))
     art = "\n".join("".join(ASCII_CHARS[min(9, int((255 - v) * 3.0) // 28)] for v in line)
                     for line in px)
+    if pol == "dark":
+        art = "\n".join("".join(ASCII_CHARS[min(9, int(v * 3.0) // 28)] for v in line)
+                        for line in px)
     q = im.convert("P", palette=Image.ADAPTIVE, colors=12).convert("RGB")
     counts: dict[tuple, int] = {}
     for c in q.getdata():
@@ -75,7 +88,8 @@ def frame_stats(png: str | Path, ascii_cols: int = 96, rows: int = 0) -> dict:
     dom = [{"rgb": "#%02x%02x%02x" % c, "share": round(n / total, 3)}
            for c, n in sorted(counts.items(), key=lambda kv: -kv[1])[:5]]
     return {"ink": ink, "tiles_3x3": tiles, "dominant": dom, "ascii": art,
-            "size": [w, h]}
+            "size": [w, h], "polarity": pol, "canvas": round(canvas, 1),
+            "drawn_pct": drawn_pct}
 
 
 def probe_stats(probe: dict) -> dict:
@@ -92,7 +106,10 @@ def probe_stats(probe: dict) -> dict:
         elif e.get("w", 0) < 1:
             zero_width.append(e["text"][:40])
         fg, bg = _rgb(e.get("color")), (_rgb(e.get("bg")) or (255, 255, 255))
-        if fg and bg:
+        # Prefer the colour the text actually sits on (bgEff walks up to the first opaque plate);
+        # falling straight back to white reported every light-on-dark caption as unreadable.
+        bg = _rgb(e.get("bgEff")) or _rgb(e.get("bg")) or (255, 255, 255)
+        if fg:
             ratio = contrast(fg, bg)
             if ratio < 4.5 and e.get("fs", 0) < 40:
                 low_contrast.append({"text": e["text"][:32], "ratio": ratio, "fs": e.get("fs")})
@@ -126,8 +143,12 @@ def merge(rows: list[dict], ascii_cols: int = 96) -> dict:
         for e in item.get("zero_width", []):
             out["problems"].append({"t": t, "kind": "zero_width_text", "text": e})
         if item.get("ink", {}).get("lt_225", 0) < 0.02:
+            drawn_pct = item.get("drawn_pct")
+            if drawn_pct is None:
+                drawn_pct = item["ink"]["lt_225"]
             out["problems"].append({"t": t, "kind": "frame_nearly_empty",
-                                    "detail": f"only {item['ink']['lt_225']}% ink below 225"})
+                                    "detail": f"only {drawn_pct}% of the frame carries "
+                                              f"material (polarity {item.get('polarity', 'light')})"})
         out["times"].append(item)
     out["ok"] = not out["problems"]
     out["problem_count"] = len(out["problems"])
@@ -140,7 +161,9 @@ def human(rep: dict, ascii_for: float | None = None) -> str:
     for item in rep["times"]:
         ink = item.get("ink", {})
         lines.append(f"t={item['t']:.2f}  luma {ink.get('luma')}  ink<225 {ink.get('lt_225')}%  "
-                     f"text {item.get('text_count')}  type-scale {item.get('type_scale')}")
+                     f"text {item.get('text_count')}  type-scale {item.get('type_scale')}"
+                     f"  drawn {item.get('drawn_pct', ink.get('lt_225'))}% "
+                     f"({item.get('polarity', 'light')})")
         if ascii_for is not None and abs(item["t"] - ascii_for) < 1e-6 and item.get("ascii"):
             lines.append(item["ascii"])
     for p in rep["problems"][:12]:

@@ -49,22 +49,20 @@ python scripts/design_audit.py draft.mp4 --project work/mine/project.json --asci
 
 也就是说，那支片子的问题**不是**"节奏慢"也不**是**"反复用同一版式"，而是**全片只有一种重量**。这就是为什么"改缓动"救不了它。阈值改的时候要重跑标定片，别凭手感调。
 
-## §2 结构搜索：先出三个，再选一个（唯一被证明有效的步骤）
+## §2 结构由你定，审计不可跳过
 
-[choreography.md](choreography.md) §1.5 已经写了这条，这里把它变成**不可跳过的一步**：
+没有强制比较轮：自己选一种宏观结构和一个生成算子（[choreography.md](choreography.md) §2/§3），
+只做到 pass 1（骨架），然后**必须**在这一步用工具量一遍——因为“好不好看”在纸面上判断不了：
 
-1. 全片只保留一句话的立意，然后写出**三个结构不同**的候选（不同的宏观结构或不同的生成算子，不是同一版式换配色）。
-2. 每套只做到 **pass 1（骨架）**：只摆块面与主体位置，不写字、不选色、不做动效。
-3. 每套渲 **4 秒**、0.35 像素、低帧率的 `rehearse` 草稿，然后：
+1. 用 `vs.py rehearse` 渲一段 **4 秒**、0.35 像素、低帧率的草稿。
+2. 量它：
    ```bash
-   python scripts/design_audit.py 候选A.mp4 --times 1,2.2,3.4 --ascii
-   python scripts/design_audit.py 候选B.mp4 --times 1,2.2,3.4 --ascii
-   python scripts/design_audit.py 候选C.mp4 --times 1,2.2,3.4 --ascii
+   python scripts/design_audit.py 草稿.mp4 --times 1,2.2,3.4 --ascii
    ```
-4. 按四条打分（同分选元素更少、留白更大的那个）：**静帧站得住 / 一句话讲得清 / 重量与布局互不相同 / 能按 `t` 纯函数实现**。
-5. 选中的那套才做 pass 2–5；落选的写进 choreography §7。
+3. 四条判据里任何一条失败（重量单一 / 节奏平线 / 没有可读停顿 / 布局重复），**改结构，不是改缓动**。
+4. 通过之后再做 pass 2–5；用过的机制写进 choreography §7。
 
-成本：三段 4 秒草稿约两分钟，和一次 30 秒成片渲染比可以忽略。**跳过这一步，就是在用最终渲染做设计探索**——而那是最贵、也最容易将就的方式。
+成本：一段 4 秒草稿约一分钟。**跳过这一步，就是在用最终渲染做设计探索**——而那是最贵、也最容易将就的方式。
 
 ## §3 快闪的真实定义
 
@@ -112,7 +110,7 @@ python scripts/vs.py plan        work/mine/project.json                         
 
 | 内容 | 出处 |
 | --- | --- |
-| 三候选结构搜索、pass 1 骨架、四条打分 | [choreography.md](choreography.md) §1.5（动效网页设计的"多方案合成流"） |
+| pass 1 骨架、四条闸门、用过的机制进坟场 | [choreography.md](choreography.md) §1.5、§7 |
 | 双峰版式、色彩三档、字号跳跃 | [taste.md](taste.md) §1、[choreography.md](choreography.md) §4.5 |
 | 转场时长、停顿、静止是主角 | [rhythm-handoff.md](rhythm-handoff.md) §2、[choreography.md](choreography.md) §6 第 8/12 条 |
 | 停顿按变化像素计、重量判据、ASCII 读图 | 本次真实交付的标定（本文 §1.1 的数字） |

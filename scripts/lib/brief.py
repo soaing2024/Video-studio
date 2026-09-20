@@ -268,10 +268,11 @@ def save(brief: dict, path: str | Path) -> dict:
 
 
 def compile_brief(brief: dict, *, music: str | None = None, subtitles: bool = True,
-                  progress_bar: bool = True) -> dict:
+                 progress_bar: bool = True, force: bool = False) -> dict:
     """Turn a validated plan into one renderable take."""
     problems = [i for i in validate(brief) if i["level"] == "error"]
-    if problems:
+    # `--force` has to mean "compile anyway": re-validating here made the flag a no-op.
+    if problems and not force:
         raise ValueError("plan is incomplete: " + "; ".join(f"{p['where']}: {p['message']}"
                                                             for p in problems))
     goal = brief.get("goal", {})
@@ -304,6 +305,11 @@ def compile_brief(brief: dict, *, music: str | None = None, subtitles: bool = Tr
 
     # Narration is one continuous line for the take, so `vs.py narrate` decides the total length.
     voice = (brief.get("audio") or {}).get("voice") or {}
+    # One narration line per chapter, anchored to the chapter's own start time. `vs.py narrate`
+    # measures each line, places it at that anchor, and rewrites this chapter table if the
+    # reading runs long - so picture, voice and subtitles share one clock. The old shape joined
+    # the whole script into a single line, which produced one take-long subtitle and a chapter
+    # table that no longer described where the voice actually was.
     spec["narration"] = {
         "voice": None if voice.get("name") in (None, "", "auto") else voice["name"],
         "rate": int(voice.get("rate", 0)),
@@ -312,7 +318,11 @@ def compile_brief(brief: dict, *, music: str | None = None, subtitles: bool = Tr
         "gap": 0.2,
         "min_duration": 3.0,
         "gain_db": float(voice.get("gain_db", 0)),
-        "lines": [{"segment": "take", "text": " ".join(str(c.get("say", "")) for c in cues)}],
+        "lines": [{"segment": "take",
+                   "at": float(c.get("at") or 0.0),
+                   "chapter": c.get("index"),
+                   "text": str(c.get("say") or "").strip()}
+                  for c in cues if str(c.get("say") or "").strip()],
     }
 
     tracks = []

@@ -17,37 +17,12 @@ import shutil
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from lib.jsonc import strip_comments  # noqa: E402  (shared with spec.py / design_audit.py)
+
 STARTER = Path(__file__).resolve().parent.parent / "assets" / "starter"
 
 
-def strip_comments(text: str) -> str:
-    """Drop // comments outside strings (a "//" inside a value must survive)."""
-    out = []
-    for line in text.splitlines():
-        buf, in_str, esc, i = [], False, False, 0
-        while i < len(line):
-            ch = line[i]
-            if in_str:
-                buf.append(ch)
-                if esc:
-                    esc = False
-                elif ch == "\\":
-                    esc = True
-                elif ch == '"':
-                    in_str = False
-                i += 1
-                continue
-            if ch == '"':
-                in_str = True
-                buf.append(ch)
-                i += 1
-                continue
-            if ch == "/" and i + 1 < len(line) and line[i + 1] == "/":
-                break
-            buf.append(ch)
-            i += 1
-        out.append("".join(buf).rstrip())
-    return "\n".join(l for l in out if l.strip())
 
 
 def darken(hex_color: str, amount: float = 0.035) -> str:
@@ -135,7 +110,7 @@ def main() -> int:
         "jobs": jobs,
         "unfilled_placeholders": left,
         "next": [
-            "write the motion spec (references/motion-prompts.md, 7 lines) before coding",
+            "write the motion spec (references/motion-realism.md, 7 lines) before coding",
             f"python <video-studio>/scripts/vs.py preview \"{project}\" --at 2 --out <dir>/p1.png",
             f"python <video-studio>/scripts/vs.py plan \"{project}\"",
             f"python <video-studio>/scripts/vs.py run \"{project}\" --jobs {jobs}",

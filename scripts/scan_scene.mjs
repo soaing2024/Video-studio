@@ -79,7 +79,15 @@ if (ready) {
     let res;
     try {
       await page.evaluate((tt) => window.seek(tt), t);
-      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r())));
+      // requestAnimationFrame can stall (software rasterisation, a hidden page, a slow first
+      // paint). render_segment.mjs learned this and added a timer; this scan needs the same
+      // escape hatch or `vs.py check` can hang forever on a stalled compositor.
+      await page.evaluate(() => new Promise((r) => {
+        let done = false;
+        const fin = () => { if (!done) { done = true; r(); } };
+        requestAnimationFrame(fin);
+        setTimeout(fin, 40);
+      }));
       res = await page.evaluate(sample, t);
     } catch (e) {
       out.broken.push({ t: +t.toFixed(3), kind: "seek_threw", detail: String(e).split("\n")[0].slice(0, 160) });

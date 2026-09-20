@@ -5,44 +5,15 @@ import json
 import re
 from pathlib import Path
 
+# One comment stripper for the whole skill (lib/jsonc.py). The alias keeps the older
+# `from lib.spec import _strip_comments` import in design_audit.py working.
+from .jsonc import strip_comments as _strip_comments
+
 
 class SpecError(ValueError):
     """Raised for an invalid project file."""
 
 
-def _strip_comments(text: str) -> str:
-    """Drop // comments without touching strings (so a "//" key still works)."""
-    out: list[str] = []
-    for line in text.splitlines():
-        buf: list[str] = []
-        in_str = False
-        escaped = False
-        i = 0
-        while i < len(line):
-            ch = line[i]
-            if in_str:
-                buf.append(ch)
-                if escaped:
-                    escaped = False
-                elif ch == "\\":
-                    escaped = True
-                elif ch == '"':
-                    in_str = False
-                i += 1
-                continue
-            if ch == '"':
-                in_str = True
-                buf.append(ch)
-                i += 1
-                continue
-            if ch == "/" and i + 1 < len(line) and line[i + 1] == "/":
-                break
-            buf.append(ch)
-            i += 1
-        stripped = "".join(buf).rstrip()
-        if stripped:
-            out.append(stripped)
-    return "\n".join(out)
 
 
 def load(path) -> dict:
@@ -86,9 +57,15 @@ def normalize(spec: dict, base_dir: Path) -> dict:
         take = 0.0 if spec["duration"] == "auto" else float(spec["duration"])
         holds = spec.get("hold") or []
         for pair in holds:
-            if (not isinstance(pair, (list, tuple)) or len(pair) != 2
-                    or not 0 <= float(pair[0]) < float(pair[1]) <= take):
-                raise SpecError(f"hold window {pair!r} is not a [start, end] inside 0..{take}")
+            # With `duration: "auto"` the take length is whatever the narration turns out to be,
+            # so the upper bound cannot be checked here - only the shape. Comparing against a take
+            # of 0.0 rejected every hold on every auto project.
+            shape_ok = (isinstance(pair, (list, tuple)) and len(pair) == 2
+                        and float(pair[0]) >= 0 and float(pair[1]) > float(pair[0]))
+            range_ok = take <= 0 or float(pair[1]) <= take
+            if not (shape_ok and range_ok):
+                where = "inside 0..<narration length>" if take <= 0 else f"inside 0..{take}"
+                raise SpecError(f"hold window {pair!r} is not a [start, end] {where}")
         spec["segments"] = [{
             "id": spec.get("take_id") or "take",
             "scene": spec["scene"],
@@ -295,8 +272,26 @@ def validate(spec: dict) -> list[dict]:
                 add("error", seg["id"], f"asset '{name}' not found: {value}")
         if not seg.get("duration"):
             add("error", seg["id"], "duration is 0 or missing")
+        if float(seg.get("duration") or 0) > 0:
+            for pair in (seg.get("hold") or []):
+                try:
+                    a, b = float(pair[0]), float(pair[1])
+                except (TypeError, ValueError, IndexError):
+                    add("error", seg["id"], f"hold window {pair!r} is not a [start, end] pair")
+                    continue
+                if not (0 <= a < b <= float(seg["duration"])):
+                    add("error", seg["id"],
+                        f"hold window {pair!r} is outside 0..{seg['duration']}")
         if not (seg.get("data") or {}).get("still") and float(seg.get("duration") or 0) > 30:
-            add("warning", seg["id"], f"{seg['duration']}s of full animation is expensive; consider still: true")
+            # `still: true` is rejected on a single-take project (it would freeze the whole take),
+            # so the advice has to name the mechanism that actually exists there: hold windows.
+            if spec.get("single_take"):
+                add("warning", seg["id"],
+                    f"{seg['duration']}s of full animation is expensive; declare the static "
+                    "stretches with hold: [[start, end]] (still: true would freeze the whole take)")
+            else:
+                add("warning", seg["id"],
+                    f"{seg['duration']}s of full animation is expensive; consider still: true")
 
     # Every shot being its own scene is now structural: `normalize` refuses a segment without one,
     # so there is nothing left to warn about here.

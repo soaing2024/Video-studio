@@ -21,6 +21,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import shutil
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -40,15 +41,25 @@ CALIB_HTML = """<!doctype html><meta charset="utf-8"><style>
  <div id="b">去点亮 Star 一次编译</div>
  <div id="c">Star it. 去点亮 Star</div>
  <div class="sw" style="top:320px;background:#ffffff;color:#7c8698"><span id="d">Aa</span></div>
+ <div id="fontcheck" style="position:absolute;left:20px;top:420px;font-size:12px">?</div>
 </body>
-<script>window.seek=function(){};window.__sceneReady=true;</script>"""
+<script>
+ window.seek=function(){};window.__sceneReady=true;
+ // Resolved locally: a font that is not installed reports false, and the width comparison below
+ // then only says 'fallback', not 'tofu'. Tofu is decided from the rendered pixels.
+ document.getElementById('fontcheck').textContent =
+   document.fonts.check('64px "Microsoft YaHei"') ? 'font-resolved' : 'font-missing';
+</script>"""
 
 
 def run_scan(spec: dict, ffmpeg: str, node: str, stride: float, log=print) -> dict:
     seg = spec["segments"][0]
     w, h, _ = render.work_size(spec)
     d = render.build_dir(spec) / "scan.data.json"
-    d.write_text(json.dumps(seg.get("data") or {}), encoding="utf-8")
+    # Same payload the renderer will feed the scene (assets resolved to file URLs, duration / id /
+    # accent injected). Feeding the scan only `data` meant a scene that reads SCENE.assets saw
+    # undefined here and a real value at render time - so `check` could disagree with the film.
+    d.write_text(json.dumps(render.prepare_assets(spec, seg)), encoding="utf-8")
     cmd = [node, str(HERE / "scan_scene.mjs"), "--scene", str(render.scene_path(seg)),
            "--data", str(d), "--duration", str(seg["duration"]), "--stride", str(stride),
            "--width", str(min(w, 1920)), "--height", str(min(h, 1080))]
@@ -65,33 +76,74 @@ def run_scan(spec: dict, ffmpeg: str, node: str, stride: float, log=print) -> di
 
 def calibrate(spec: dict, ffmpeg: str, node: str, log=print) -> dict:
     """CJK glyphs, contrast and bilingual scale, measured in the real headless browser."""
+    """CJK glyphs, contrast and type-scale ratio, measured in the real headless browser."""
+    # One mkdtemp, always cleaned in the finally below: this used to leak a directory per call.
     tmp = Path(tempfile.mkdtemp(prefix="vs-calib-"))
-    html = tmp / "calib.html"
-    html.write_text(CALIB_HTML, encoding="utf-8")
-    png, probe = tmp / "c.png", tmp / "c.json"
-    cmd = [node, str(HERE / "render_segment.mjs"), "--scene", str(html), "--out", str(tmp / "c.mp4"),
-           "--fps", "30", "--duration", "0.05", "--width", "960", "--height", "540",
-           "--ffmpeg", ffmpeg, "--still", "0", "--still-out", str(png), "--probe", str(probe)]
-    cmd += render.runtime_args(spec, spec["segments"][0])
-    subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                   env=render.runtime_env())
-    out = {"cjk_ok": None, "fallback_delta": None, "contrast": None, "bilingual_scale": None}
-    if probe.is_file():
-        els = {e["text"]: e for e in json.loads(probe.read_text(encoding="utf-8"))["elements"]}
-        a = next((e for t, e in els.items() if t.startswith("去点亮") and e["fs"] == 64), None)
-        b = next((e for t, e in els.items() if t.startswith("去点亮") and e["fs"] == 64), None)
-        widths = [e["w"] for t, e in els.items() if t.startswith("去点亮") and e["fs"] == 64]
-        if len(widths) >= 2:
-            # the real font and the deliberately-missing font must not measure identically
-            out["fallback_delta"] = round(abs(widths[0] - widths[1]), 1)
-            out["cjk_ok"] = out["fallback_delta"] > 0.5 and widths[0] > 8
-        for e in els.values():
-            if e.get("fs") == 32:
-                fg = analyze._rgb(e.get("color"))
-                bg = analyze._rgb(e.get("bg")) or (247, 248, 250)
-                if fg:
-                    out["contrast"] = analyze.contrast(fg, bg)
-    return out
+    try:
+        html = tmp / "calib.html"
+        html.write_text(CALIB_HTML, encoding="utf-8")
+        png, probe = tmp / "c.png", tmp / "c.json"
+        cmd = [node, str(HERE / "render_segment.mjs"), "--scene", str(html),
+               "--out", str(tmp / "c.mp4"), "--fps", "30", "--duration", "0.05",
+               "--width", "960", "--height", "540", "--ffmpeg", ffmpeg,
+               "--still", "0", "--still-out", str(png), "--probe", str(probe)]
+        cmd += render.runtime_args(spec, spec["segments"][0])
+        subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                       env=render.runtime_env())
+        out = {"cjk_ok": None, "fallback_delta": None, "contrast": None,
+               "bilingual_scale": None, "sizes": []}
+        if probe.is_file():
+            els = json.loads(probe.read_text(encoding="utf-8"))["elements"]
+            # Key by element id, not by text: the two 64px calibration lines carry the *same*
+            # sentence, so a text-keyed dict kept only one of them and the font-fallback check
+            # could never fire (it needed two widths and always found one).
+            by_id = {e.get("id"): e for e in els if isinstance(e, dict) and e.get("id")}
+            a, b = by_id.get("a"), by_id.get("b")
+            if a and b:
+                # the real font and the deliberately-missing font must not measure identically
+                out["fallback_delta"] = round(abs(a["w"] - b["w"]), 1)
+                out["cjk_ok"] = out["fallback_delta"] > 0.5 and a["w"] > 8
+            else:
+                widths = sorted((e["w"] for e in els
+                                 if str(e.get("text", "")).startswith("去点亮")
+                                 and e.get("fs") == 64), reverse=True)
+                if len(widths) >= 2:
+                    out["fallback_delta"] = round(abs(widths[0] - widths[1]), 1)
+                    out["cjk_ok"] = out["fallback_delta"] > 0.5 and widths[0] > 8
+            sizes = sorted({e["fs"] for e in els if e.get("fs")})
+            out["sizes"] = sizes
+            if len(sizes) >= 2 and sizes[0] > 0:
+                out["bilingual_scale"] = round(sizes[-1] / sizes[0], 2)
+            out["named_font_resolved"] = (by_id.get("fontcheck", {}) or {}).get("text") == "font-resolved"
+            # Tofu or silent fallback? Measure the ink inside the headline's own box: a missing CJK
+            # face that draws nothing leaves an empty box, while a working fallback still draws.
+            headline = by_id.get("a")
+            if headline and png.is_file():
+                try:
+                    from PIL import Image
+                    import numpy as np
+                    im = Image.open(png).convert("L")
+                    x0 = max(0, int(headline["x"]))
+                    y0 = max(0, int(headline["y"]))
+                    x1 = min(im.width, int(headline["x"] + headline["w"]))
+                    y1 = min(im.height, int(headline["y"] + headline["h"]))
+                    if x1 > x0 and y1 > y0:
+                        arr = np.asarray(im.crop((x0, y0, x1, y1)))
+                        out["headline_ink_pct"] = round(float((arr < 200).mean()) * 100, 2)
+                        out["glyphs_drawn"] = out["headline_ink_pct"] > 0.5
+                except Exception as e:      # measurement must not fail the check itself
+                    out["ink_error"] = str(e)[:120]
+            for e in els:
+                if e.get("fs") == 32:
+                    fg = analyze._rgb(e.get("color"))
+                    bg = (analyze._rgb(e.get("bgEff")) or analyze._rgb(e.get("bg"))
+                          or (247, 248, 250))
+                    if fg:
+                        out["contrast"] = analyze.contrast(fg, bg)
+        return out
+    finally:
+        # Every check used to leave a temp directory behind: %TEMP% had 77 of them.
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def main(argv=None) -> int:
@@ -114,6 +166,7 @@ def main(argv=None) -> int:
               for k, v in scan.get("visibility", {}).items()
               if v["spans"] and v["spans"][0][0] <= 0.001 and v["spans"][-1][1] > 1.0]
     problems = []
+    warnings: list[dict] = []
     if not scan.get("ready"):
         problems.append({"kind": "scene_not_ready", "detail": "window.seek never became ready"})
     for b in scan.get("broken", [])[:10]:
@@ -123,30 +176,49 @@ def main(argv=None) -> int:
     if scan.get("errors"):
         problems.append({"kind": "page_error", "detail": scan["errors"][0][:200]})
     if calib and calib.get("cjk_ok") is False:
-        problems.append({"kind": "cjk_font_fallback",
-                         "detail": f"real and missing font measure the same width "
-                                   f"(delta {calib.get('fallback_delta')})",
-                         "fix_hint": "name a font that exists in headless Chromium "
-                                     "(Microsoft YaHei / Noto Sans SC) or embed it"})
+        if calib.get("glyphs_drawn") is False:
+            problems.append({"kind": "cjk_font_fallback",
+                             "detail": f"no glyphs drawn for the CJK headline "
+                                       f"(ink {calib.get('headline_ink_pct')}%)",
+                             "fix_hint": "install the named CJK font, name one that exists, or embed it"})
+        else:
+            # The named font did not resolve, but the fallback still draws glyphs. That is a
+            # fidelity problem for this machine, not the tofu failure this gate exists to catch.
+            warnings.append({"kind": "cjk_font_not_installed",
+                             "detail": f"the declared CJK font did not resolve (real and missing "
+                                       f"font differ by {calib.get('fallback_delta')}px); the fallback "
+                                       f"still draws glyphs (headline ink {calib.get('headline_ink_pct')}%)",
+                             "fix_hint": "install the named font or name one present on the render machine"})
     if calib.get("contrast") is not None and calib["contrast"] < 4.5:
         problems.append({"kind": "low_contrast", "detail": f"{calib['contrast']}:1 on the canvas",
                          "fix_hint": "darken the ink or add a white plate behind the line"})
+    if calib.get("bilingual_scale") is not None and calib["bilingual_scale"] < 2.0:
+        problems.append({"kind": "type_scale_collapsed",
+                         "detail": f"largest/smallest text measures {calib['bilingual_scale']}x "
+                                   f"(the calibration page declares at least 2x)",
+                         "fix_hint": "check for a global transform/zoom that scales text away"})
 
     report = {"ok": not problems, "samples": scan.get("samples"), "stride": args.stride,
-              "problems": problems, "ghosts_visible_from_t0": ghosts[:12],
+              "problems": problems, "warnings": warnings,
+              "ghosts_visible_from_t0": ghosts[:12],
               "visibility": {k: {"text": v["text"], "size": v["size"], "spans": v["spans"][:8]}
                              for k, v in list(scan.get("visibility", {}).items())[:60]},
               "calibration": calib}
     out = render.build_dir(spec) / "scene_check.json"
     out.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
-    fmt.emit({"ok": report["ok"], "problems": len(problems), "samples": report["samples"],
-              "ghosts": len(ghosts), "report": str(out), "which": "scene_check"},
-             human=(f"check: {len(problems)} problem(s) over {report['samples']} samples"
+    fmt.emit({"ok": report["ok"], "problems": len(problems), "warnings": len(warnings),
+              "samples": report["samples"], "ghosts": len(ghosts), "report": str(out),
+              "which": "scene_check"},
+             human=(f"check: {len(problems)} problem(s)"
+                    + (f", {len(warnings)} warning(s)" if warnings else "")
+                    + f" over {report['samples']} samples"
                     + (f"; {len(ghosts)} element(s) already visible at t=0" if ghosts else "")
                     + f" -> {out.name}"))
-    if not report["ok"] and not args.json:
+    if not args.json:
         for p in problems[:8]:
             print("  ! " + json.dumps(p, ensure_ascii=False)[:160])
+        for w in warnings[:4]:
+            print("  ~ " + json.dumps(w, ensure_ascii=False)[:160])
     return 0 if report["ok"] else 1
 
 

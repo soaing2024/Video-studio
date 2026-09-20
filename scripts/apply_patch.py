@@ -138,8 +138,18 @@ def apply_edits(doc: dict, root: Path, keep_on_fail: bool) -> dict:
             raise fmt.fail("VERIFY_FAILED", bad[0]["cmd"], "exit 0", fmt.truncate(bad[0]["output"], 6, 6),
                            "the batch was rolled back; fix the edit and resubmit",
                            "\n".join(r["output"][-200:] for r in bad[:2]))
+        # Syntax check inside the transaction: a file that no longer parses must be rolled back,
+        # and this used to run in main() *after* apply_edits had already committed, so the
+        # SYNTAX_FAILED message said "rolled back" while the broken file stayed on disk.
+        syn = syntax_check([Path(a["path"]) if Path(a["path"]).is_absolute() else root / a["path"]
+                           for a in applied])
+        bad_syn = [s for s in syn if not s["ok"]]
+        if bad_syn:
+            raise fmt.fail("SYNTAX_FAILED", bad_syn[0]["path"], "the file parses",
+                           bad_syn[0].get("detail", ""),
+                           "the batch was rolled back; fix the replacement text and resubmit")
         return {"ok": True, "applied": applied, "degraded_to_full_rewrite": degraded,
-                "verify": results, "rolled_back": False}
+                "verify": results, "syntax": syn, "rolled_back": False}
     except Exception as e:
         rolled = rollback(backups) if not keep_on_fail else []
         if isinstance(e, fmt.VsError):
@@ -213,14 +223,6 @@ def main(argv=None) -> int:
     root = Path(args.root).resolve()
     try:
         res = apply_edits(doc, root, args.keep_on_fail)
-        touched = [Path(a["path"]) for a in res["applied"]]
-        syn = syntax_check(touched)
-        bad = [s for s in syn if not s["ok"]]
-        if bad:
-            raise fmt.fail("SYNTAX_FAILED", bad[0]["path"], "the file parses",
-                           bad[0].get("detail", ""),
-                           "rolled back - fix the replacement text and resubmit")
-        res["syntax"] = syn
         fmt.emit({**res, "which": "apply_patch"},
                  human=f"patched {len(res['applied'])} edit(s) in "
                        f"{len(set(a['path'] for a in res['applied']))} file(s); "

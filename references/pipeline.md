@@ -32,16 +32,22 @@ which as PNGs would be several gigabytes and thousands of filesystem calls.
 
 ## 3. Caching
 
-`render.py` hashes template bytes + segment data + every asset's path/size/mtime + render size and
-fps into a 16-char key, stored next to the clip as `.key`. A matching key means the clip is reused.
+`render.py` hashes scene bytes + segment data + every asset's path/size/mtime + render size, fps,
+shutter, hold windows, the segment crf/preset/jpeg flags, the accent and the vendored-library
+fingerprints into a 16-char key, stored next to the clip as `.key`. A matching key means reuse.
 
 Measured effect: after the first run of the 3-segment demo, a full `run` took ~3 seconds because
 only assembly and verification re-executed.
 
-With `--slices N` a single take is cut into N time ranges, each with its own cache key. A cheap
-downscaled signature pass records which frames actually changed, so a re-run renders only the
-slices whose states changed; a crash re-renders only the missing slices, and the join verifies the
-total frame count before the take is accepted.
+Slicing is opt-in: `--slices N` (or `render.slices`) cuts a take into N time ranges, each with
+its own cache key, and the ranges are allocated by cumulative frame index so the per-slice frame
+counts always add up to the take's own frame count. A crash re-renders only the missing slices,
+and the join verifies the total before the take is accepted.
+
+With `--incremental` a downscaled signature pass additionally records which frames changed, but a
+slice is only re-used when the signature is unchanged **and** every non-scene input (assets,
+encode args, libraries, size, holds) still matches - otherwise an edited asset would keep the old
+pictures and stamp them as fresh.
 
 `--force` ignores the cache. Use it after changing anything the key cannot see (for example, a file
 edited in place within the same second).
@@ -130,8 +136,9 @@ machine you are actually on.
 | `hold` window | 1 frame per window, whatever its length | yes | seconds |
 
 Ways to buy speed, in order of payoff: `hold` windows for static sections → pixel look or lower
-resolution → `fps: 24` for long-form → `--slices N` for parallel rendering of a single take
-(diminishing returns past core count) → cached slices for re-runs.
+resolution → `fps: 24` for long-form → cached slices for re-runs. `--slices N` (opt-in only, for
+parallel rendering of a single take; diminishing returns past core count) is a deliberate
+exception the user has to ask for - the default is always one process.
 
 ## 9. Failure modes already hit
 

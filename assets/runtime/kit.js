@@ -182,7 +182,10 @@
           animActor.to({ opacity: 0, y: -16, blur: 6 }, { at, dur: 0.24, ease: "in" });
           animActor.to({ opacity: 1, y: 0, blur: 0 }, { at: at + 0.26, dur: 0.42, ease: "out" });
         }
-        setTimeout(() => { node.textContent = texts[idx]; }, 0);
+        // Synchronous on purpose. A setTimeout here makes the frame depend on the wall clock,
+        // which is the one thing this runtime promises never to do: called from seek(t) the swap
+        // lands on the frame that crossed the boundary, and a scrubbed frame stays reproducible.
+        node.textContent = texts[idx];
         return texts[idx];
       }
     };

@@ -29,7 +29,10 @@
 (function (global) {
   const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
   const BAKED_DT = 1 / 600;
-  const MAX_BAKE = 30;            // seconds; beyond this a system is reported as settled
+// 15 minutes. The old cap was 30 s and silently clamped anything longer, so a long take kept
+// sampling the last baked value - the motion froze mid-shot with no error. Memory is not the
+// constraint here: 15 minutes at 1/600 s is 900k doubles, about 7 MB per system.
+const MAX_BAKE = 900;           // seconds
 
   /* deterministic 32-bit hash -> [0,1) */
   function hash(i, seed) {
@@ -82,7 +85,8 @@
   function bake(opts) {
     const o = opts || {};
     const dt = o.dt || BAKED_DT;
-    const duration = Math.min(MAX_BAKE, Math.max(0.1, o.duration || 12));
+    const wanted = Math.max(0.1, o.duration || 12);
+    const duration = Math.min(MAX_BAKE, wanted);
     const n = Math.ceil(duration / dt) + 1;
     const init = () => JSON.parse(JSON.stringify(o.state === undefined ? 0 : o.state));
     const step = o.step || function (s) { return s; };
@@ -99,7 +103,8 @@
       duration: duration,
       samples: out,
       at(t) { return interpolate(out, dt, Math.max(0, t)); },
-      settled: true
+      clamped: wanted > duration,
+      settled: wanted <= duration
     };
   }
 
@@ -126,6 +131,10 @@
       read(s) { return to + s.x; }
     });
     sys.to = to; sys.from = from;
+    // Honest settle test: the spring is done when its tail is at the target. This used to be
+    // hardcoded `true`, so a system that was still moving claimed it had finished.
+    const tail = sys.samples[sys.samples.length - 1];
+    sys.settled = Math.abs(tail - to) <= Math.max(0.001, Math.abs(to - from) * 0.01);
     return sys;
   }
 

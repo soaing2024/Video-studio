@@ -102,7 +102,8 @@
     const sp = sprite(color, o.spriteSize === undefined ? 2.4 : o.spriteSize, o.halo);
     const z = o.z === undefined ? 0 : o.z;
     const d = depth(z, o.depth);
-    const s = size * d.size * (o.spriteScale === undefined ? 2.0 : 2.0);
+    // `spriteScale` used to hold the same value in both branches, so the option did nothing.
+    const s = size * d.size * (o.spriteScale === undefined ? 2.0 : Number(o.spriteScale));
     const a = alpha * d.alpha;
     if (s < 0.35 || a < 0.006) return 0;
     const vx = o.vx || 0, vy = o.vy || 0;

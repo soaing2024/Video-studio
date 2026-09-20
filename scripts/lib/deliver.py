@@ -57,13 +57,14 @@ def closing_card(out_dir: str | Path, title: str = "Star it.", cn: str = "去点
     scene.write_text(CARD_HTML % {"title": title, "cn": cn, "accent": accent}, encoding="utf-8")
     spec = {"name": out.name or "card", "video": {"width": width, "height": height, "fps": fps,
                                                  "crf": 16, "preset": "fast"},
-            "render": {"jobs": 1, "crf": 12, "slices": 4},
+            # No `slices` on purpose: slicing is opt-in, and a 5 s card does not need it.
+            "render": {"jobs": 1, "crf": 12},
             "look": {"accent": accent}, "duration": duration, "scene": "card.html",
             "data": {"title": title}, "audio": {"tracks": []}}
     (out / "project.json").write_text(json.dumps(spec, ensure_ascii=False, indent=1), encoding="utf-8")
     return {"ok": True, "which": "card", "project": str(out / "project.json"),
             "scene": str(scene), "duration": duration,
-            "how": f"python scripts/vs.py run {out / 'project.json'} --slices 4 --jobs 4"}
+            "how": f"python scripts/vs.py run {out / 'project.json'}"}
 
 
 def note(spec: dict, verify_report: dict | None = None, out: str | Path | None = None) -> str:

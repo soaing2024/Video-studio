@@ -49,6 +49,26 @@ def hold_args(seg: dict) -> list[str]:
 RUNTIME_FILES = ("scene.js", "anim.js", "phys.js", "look.js", "kit.js", "three-kit.js", "director.js")
 
 
+def resolve_slices(spec: dict, cli_value=None) -> int:
+    """How many parallel time slices this take may use. Slicing is strictly OPT-IN.
+
+    House rule (2026-09): a take is never split unless it was explicitly asked for, however
+    long it is. The only two ways to ask are `--slices N` on the command line or
+    `render.slices` in the project file. Everything else - including very long 4K takes -
+    renders in one process, which is also the only way a frame is guaranteed to be exactly
+    what a single-process render would have produced.
+    """
+    if cli_value is not None:
+        return max(1, int(cli_value))
+    raw = (spec.get("render") or {}).get("slices")
+    if raw in (None, "", 0, False):
+        return 1
+    try:
+        return max(1, int(raw))
+    except (TypeError, ValueError):
+        return 1
+
+
 def shutter_samples(spec: dict) -> int:
     """Oversampling factor for shutter-angle motion blur (look.finish.shutter).
 
@@ -114,6 +134,19 @@ def _key(spec: dict, seg: dict, w: int, h: int) -> str:
     hsh = hashlib.sha256()
     tpl = scene_path(seg)
     hsh.update(tpl.read_bytes() if tpl.is_file() else b"missing-scene")
+    hsh.update(_inputs_fingerprint(spec, seg, w, h).encode())
+    return hsh.hexdigest()[:16]
+
+
+def _inputs_fingerprint(spec: dict, seg: dict, w: int, h: int) -> str:
+    """Everything that decides the rendered picture, except the scene source itself.
+
+    Both cache keys are built from this, so the two of them can never drift apart again.
+    `encode_args` is in here on purpose: changing crf / preset / jpeg / png-compression
+    changes the clip that comes out, so it must invalidate the cache. It used to invalidate
+    only slices, which meant a changed `render.crf` silently re-used the old segment.
+    """
+    hsh = hashlib.sha256()
     hsh.update(json.dumps(seg.get("data", {}), sort_keys=True, ensure_ascii=False).encode())
     for name, value in sorted(seg.get("assets", {}).items()):
         hsh.update(f"{name}:{value}:".encode())
@@ -123,10 +156,14 @@ def _key(spec: dict, seg: dict, w: int, h: int) -> str:
             hsh.update(f"{st.st_size}:{int(st.st_mtime)}".encode())
     hsh.update(f"{w}x{h}@{spec['video']['fps']}:{float(seg['duration'])}".encode())
     hsh.update(f"shutter={shutter_samples(spec)}".encode())
+    # render.crf is passed to the encoder outside encode_args(), so it has to be named here too.
+    hsh.update(f"crf={(spec.get('render') or {}).get('crf', 12)}".encode())
     hsh.update(json.dumps(seg.get("hold") or [], sort_keys=True).encode())
+    hsh.update(f"accent={(spec.get('look') or {}).get('accent', '')}".encode())
+    hsh.update(json.dumps(encode_args(spec, seg, w, h)).encode())
     # A vendored library is part of the picture: upgrading it must invalidate the cache.
     hsh.update(libs.fingerprint(list(spec.get("libs") or []) + list(seg.get("libs") or [])).encode())
-    return hsh.hexdigest()[:16]
+    return hsh.hexdigest()
 
 
 def cache_key(spec: dict, seg: dict) -> str:
@@ -269,11 +306,37 @@ def pending(spec: dict) -> list[dict]:
     return [s for s in spec["segments"] if s["id"] in used]
 
 
+def apply_render_overrides(spec: dict, overrides: dict | None) -> dict:
+    """Fold CLI render flags into a copy of the spec (the project file is never rewritten).
+
+    `--preset / --jpeg / --reboot / --no-gpu` used to be registered on the parser and then
+    dropped on the floor: the CLI advertised knobs that never reached `encode_args`. Folding
+    them in here means `plan`, `render` and `run` all see the same picture, and the spec on
+    disk stays untouched.
+    """
+    if not overrides:
+        return spec
+    r = dict(spec.get("render") or {})
+    for key, value in overrides.items():
+        if isinstance(value, bool):
+            if key == "gpu" and value is False:
+                r[key] = False
+            elif value:
+                r[key] = True
+            continue
+        if value in (None, "", 0):
+            continue
+        r[key] = value
+    return {**spec, "render": r}
+
+
 def render_all(spec: dict, ffmpeg: str, node: str, jobs: int | None = None,
                force: bool = False, slices: int | None = None,
-               incremental: bool | None = None, log=print) -> list[dict]:
+               incremental: bool | None = None, overrides: dict | None = None,
+               log=print) -> list[dict]:
+    spec = apply_render_overrides(spec, overrides)
     jobs = jobs or int((spec.get("render") or {}).get("jobs", 2))
-    slices = slices or int((spec.get("render") or {}).get("slices", 1) or 1)
+    slices = resolve_slices(spec, slices)
     if incremental is not None:
         spec.setdefault("render", {})["incremental"] = bool(incremental)
     segs = pending(spec)
@@ -388,9 +451,23 @@ def encode_args(spec: dict, seg: dict | None = None, w: int = 0, h: int = 0) -> 
 
 
 def slice_ranges(duration: float, fps: int, slices: int) -> list[tuple[int, float, float]]:
-    n = max(1, min(int(slices), max(1, int(round(duration * fps)))))
-    span = duration / n
-    return [(i, i * span, span) for i in range(n)]
+    """Frame-exact windows: the per-slice frame counts sum to round(duration*fps).
+
+    Rounding each slice independently (`span = duration/n`, `frames = round(span*fps)`) loses
+    or gains frames whenever the take's frame count is not divisible by n, and the join then
+    fails the "joined take has X frames, expected Y" check. Allocating by cumulative frame
+    index makes the sum exact by construction and keeps every slice non-empty.
+    """
+    total = max(1, int(round(float(duration) * int(fps))))
+    n = max(1, min(int(slices), total))
+    bounds = [int(round(i * total / n)) for i in range(n + 1)]
+    out: list[tuple[int, float, float]] = []
+    for i in range(n):
+        f0, f1 = bounds[i], bounds[i + 1]
+        if f1 <= f0:
+            continue
+        out.append((i, f0 / float(fps), (f1 - f0) / float(fps)))
+    return out
 
 
 def count_frames(ffmpeg: str, path: str) -> int:
@@ -420,7 +497,12 @@ def signature_pass(spec: dict, seg: dict, ffmpeg: str, node: str, stride: int = 
     out = build_dir(spec) / "sig" / f"{seg['id']}.json"
     data_file = out.with_suffix(".data.json")
     data_file.parent.mkdir(parents=True, exist_ok=True)
-    data_file.write_text(json.dumps(seg.get("data") or {}, ensure_ascii=False), encoding="utf-8")
+    # The signature pass sees the same payload the delivery render sees (assets resolved to
+    # file URLs, duration/id/accent injected). Feeding it only `data` meant an asset-driven
+    # scene produced different frames here than in the render, so the state comparison was
+    # comparing pictures nobody was going to ship.
+    data_file.write_text(json.dumps(prepare_assets(spec, seg), ensure_ascii=False),
+                         encoding="utf-8")
     cmd = [node, str(runtime.SKILL_DIR / "scripts" / "render_segment.mjs"),
            "--scene", str(scene_path(seg)), "--out", str(out.with_suffix(".mp4")),
            "--data", str(data_file), "--fps", str(spec["video"]["fps"]),
@@ -487,32 +569,52 @@ def render_sliced(spec: dict, seg: dict, ffmpeg: str, node: str, slices: int, jo
     jobs = safe_jobs(w, h, jobs, log=log)
     plan = slice_ranges(duration, fps, slices)
     incremental = bool((spec.get("render") or {}).get("incremental"))
-    sig_path = build_dir(spec) / "sig" / f"{seg['id']}.prev.json"
     if incremental:
-        # cheap pass first: which frames actually changed since the last render?
+        # Cheap pass first: which frames actually changed since the last render?
+        #
+        # A slice is reused only when BOTH hold:
+        #   * the frame signature says its frames are identical, and
+        #   * every non-scene render input is unchanged (assets, encode args, libs, size, holds).
+        # The second condition is what makes re-stamping honest. This used to keep a slice
+        # whenever the frames looked the same and then overwrite its key with the current one,
+        # so an edited image asset (or crf, or a vendored library) silently kept the old
+        # pictures and cached that mistake as if it were fresh.
+        sig_path = build_dir(spec) / "sig" / f"{seg['id']}.prev.json"
         prev = json.loads(sig_path.read_text(encoding="utf-8")) if sig_path.is_file() else None
-        cur = signature_pass(spec, seg, ffmpeg, node, log=log)
-        n_prev = len(prev["sigs"]) if prev else 0
-        n_diff = (sum(1 for i in range(min(n_prev, len(cur["sigs"])))
-                  if prev["sigs"][i] != cur["sigs"][i]) if prev else -1)
-        log(f"  incremental: prev={prev.get('scene_hash') if prev else None} "
-            f"cur={cur.get('scene_hash')} frames_diff={n_diff}/{n_prev}")
-        keep = [i for i in range(len(plan)) if i not in changed_slices(prev, cur, [(p[1], p[2]) for p in plan], fps)]
-        sidx = {p[0]: p for p in plan}
-        for i in keep:
-            k, start, span = sidx[i]
-            part = parts / f"{seg['id']}.{i:03d}.mp4"
-            keyf = part.with_suffix(".key")
-            if part.is_file() and keyf.is_file():
-                keyf.write_text(_slice_key(spec, seg, payload, i, start, span, w, h))
-        plan = [p for p in plan if p[0] not in keep]
-        log(f"  incremental: {len(keep)}/{len(plan) + len(keep)} slice(s) reused, {len(plan)} to render")
-        sig_path.parent.mkdir(parents=True, exist_ok=True)
-        sig_path.write_text(json.dumps(cur), encoding="utf-8")
-        if not plan:
-            # nothing changed: re-join from the cached slices and stop
-            plan = sorted([(i, i * (duration / slices_), duration / slices_)
-                           for i, slices_ in [(0, slices)]][0] for i in range(0))
+        cur = None
+        try:
+            cur = signature_pass(spec, seg, ffmpeg, node, log=log)
+        except Exception as e:      # a failed probe may cost time, never correctness
+            log(f"  incremental: signature pass failed ({str(e)[:120]}); rendering every slice")
+        if cur is not None:
+            n_prev = len(prev["sigs"]) if prev else 0
+            n_diff = (sum(1 for i in range(min(n_prev, len(cur["sigs"])))
+                      if prev["sigs"][i] != cur["sigs"][i]) if prev else -1)
+            log(f"  incremental: prev={prev.get('scene_hash') if prev else None} "
+                f"cur={cur.get('scene_hash')} frames_diff={n_diff}/{n_prev}")
+            changed = set(changed_slices(prev, cur, [(p[1], p[2]) for p in plan], fps))
+            pending_plan, keep = [], []
+            for item in plan:
+                i, start, span = item
+                part = parts / f"{seg['id']}.{i:03d}.mp4"
+                keyf = part.with_suffix(".key")
+                same_inputs = False
+                if part.is_file() and keyf.is_file():
+                    same_inputs = (keyf.read_text().strip()
+                                   == _slice_key(spec, seg, payload, i, start, span, w, h,
+                                                 with_scene=False))
+                if i not in changed and same_inputs:
+                    # The frames are proven identical and nothing but the scene source
+                    # changed, so re-stamping with the current key is legitimate.
+                    keyf.write_text(_slice_key(spec, seg, payload, i, start, span, w, h))
+                    keep.append(i)
+                else:
+                    pending_plan.append(item)
+            plan = pending_plan
+            log(f"  incremental: {len(keep)}/{len(keep) + len(plan)} slice(s) reused, "
+                f"{len(plan)} to render")
+            sig_path.parent.mkdir(parents=True, exist_ok=True)
+            sig_path.write_text(json.dumps(cur), encoding="utf-8")
     log(f"  take: {duration:g}s @ {w}x{h} -> {len(plan)} slice(s) to render, {jobs} job(s), "
         f"{RATE_MS_PER_MPX[png_kind(spec)]:.0f} ms/mpx")
 
@@ -593,17 +695,19 @@ def render_sliced(spec: dict, seg: dict, ffmpeg: str, node: str, slices: int, jo
 
 
 def _slice_key(spec: dict, seg: dict, payload: dict, i: int, start: float, span: float,
-               w: int, h: int) -> str:
+               w: int, h: int, *, with_scene: bool = True) -> str:
+    """Cache key for one time slice.
+
+    `with_scene=False` is what the incremental path compares against: it covers everything
+    except the scene source, so a slice can be re-used when the frame signature proves the
+    picture is unchanged and only the scene file was edited elsewhere.
+    """
     hsh = hashlib.sha256()
-    hsh.update(scene_path(seg).read_bytes())
+    if with_scene:
+        hsh.update(scene_path(seg).read_bytes())
     hsh.update(json.dumps({**payload, "offset": start}, sort_keys=True, ensure_ascii=False).encode())
-    for name, value in sorted((seg.get("assets") or {}).items()):
-        pth = Path(str(value))
-        if pth.is_file():
-            st = pth.stat()
-            hsh.update(f"{name}:{st.st_size}:{int(st.st_mtime)}".encode())
     hsh.update(f"{w}x{h}@{spec['video']['fps']}:{span:.6f}:{i}".encode())
-    hsh.update(json.dumps(encode_args(spec, seg, w, h)).encode())
+    hsh.update(_inputs_fingerprint(spec, seg, w, h).encode())
     # The injected runtimes decide the picture just as much as the scene does - the take-offset
     # shim lives in scene.js. Without them in the key, editing a runtime reuses stale slices and
     # the delivered take silently mixes two versions of the pipeline.

@@ -21,6 +21,9 @@ class ToolError(RuntimeError):
 SKILL_DIR = Path(__file__).resolve().parents[2]
 VENDOR_DIR = SKILL_DIR / "vendor"
 
+_PLAYWRIGHT_CACHE: tuple[str, str | None] | None = None
+_FFMPEG_CACHE: dict[tuple, str] = {}
+
 
 def _run(cmd, timeout=30, **kw):
     return subprocess.run(
@@ -82,6 +85,9 @@ def ffmpeg_candidates() -> list[str]:
 
 
 def find_ffmpeg(require=("libx264",)) -> str:
+    cached = _FFMPEG_CACHE.get(tuple(require))
+    if cached:
+        return cached
     problems = []
     for cand in ffmpeg_candidates():
         if not _is_file(cand):
@@ -94,6 +100,7 @@ def find_ffmpeg(require=("libx264",)) -> str:
         if missing:
             problems.append(f"{cand}: missing {'/'.join(missing)}")
             continue
+        _FFMPEG_CACHE[tuple(require)] = cand
         return cand
     raise ToolError(
         "No usable ffmpeg found (needs " + "/".join(require) + ")."
@@ -107,22 +114,25 @@ def install_ffmpeg(python=None) -> str:
     python = python or sys.executable
     target = VENDOR_DIR / "pylibs"
     target.mkdir(parents=True, exist_ok=True)
-    proc = _run([python, "-m", "pip", "install", "--quiet", "--target", str(target),
-                 "--upgrade", "imageio-ffmpeg"], timeout=600)
-    if proc.returncode != 0:
-        raise ToolError(f"pip install failed:\n{proc.stdout}\n{proc.stderr}")
-    for p in sorted(target.rglob("ffmpeg*")):
-        if p.is_file() and p.suffix.lower() in (".exe", ""):
+    # Remove the pip target once, after every candidate has been tried: deleting it inside the
+    # loop lost the rest of the wheel when the first binary failed the libx264 check.
+    try:
+        proc = _run([python, "-m", "pip", "install", "--quiet", "--target", str(target),
+                     "--upgrade", "imageio-ffmpeg"], timeout=600)
+        if proc.returncode != 0:
+            raise ToolError(f"pip install failed:\n{proc.stdout}\n{proc.stderr}")
+        for p in sorted(target.rglob("ffmpeg*")):
+            if not (p.is_file() and p.suffix.lower() in (".exe", "")):
+                continue
             placed = VENDOR_DIR / p.name
             shutil.copy2(p, placed)
             if not os.access(placed, os.X_OK) and os.name != "nt":
                 placed.chmod(0o755)
-            caps = ffmpeg_capabilities(str(placed))
-            # the wheel also carries its own copy of the binary; keep only the vendored one
-            shutil.rmtree(target, ignore_errors=True)
-            if "libx264" in caps:
+            if "libx264" in ffmpeg_capabilities(str(placed)):
                 return str(placed)
-    raise ToolError("installed imageio-ffmpeg but found no libx264-capable binary")
+        raise ToolError("installed imageio-ffmpeg but found no libx264-capable binary")
+    finally:
+        shutil.rmtree(target, ignore_errors=True)
 
 
 # --------------------------------------------------------------------------- node + playwright
@@ -144,10 +154,18 @@ def find_node() -> str:
 
 
 def find_playwright(node: str | None = None) -> tuple[str, str | None]:
-    """Return (module reference for require(), PLAYWRIGHT_BROWSERS_PATH or None)."""
+    """Return (module reference for require(), PLAYWRIGHT_BROWSERS_PATH or None).
+
+    Resolved once per process: `render.runtime_env()` calls this for every slice / still child,
+    and each call used to walk the whole plugin cache looking for a playwright package.
+    """
+    global _PLAYWRIGHT_CACHE
+    if _PLAYWRIGHT_CACHE is not None:
+        return _PLAYWRIGHT_CACHE
     env_mod = os.environ.get("VS_PLAYWRIGHT")
     if env_mod:
-        return env_mod, os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+        _PLAYWRIGHT_CACHE = (env_mod, os.environ.get("PLAYWRIGHT_BROWSERS_PATH"))
+        return _PLAYWRIGHT_CACHE
     home = Path.home()
     mods: list[Path] = []
     base = home / ".cache" / "codex-runtimes"
@@ -161,8 +179,11 @@ def find_playwright(node: str | None = None) -> tuple[str, str | None]:
         browsers = home / ".cache" / "ms-playwright"
     for m in mods:
         if (m / "package.json").is_file():
-            return str(m).replace("\\", "/"), (str(browsers) if browsers.exists() else None)
-    return "playwright", (str(browsers) if browsers.exists() else None)
+            _PLAYWRIGHT_CACHE = (str(m).replace("\\", "/"),
+                                 str(browsers) if browsers.exists() else None)
+            return _PLAYWRIGHT_CACHE
+    _PLAYWRIGHT_CACHE = ("playwright", str(browsers) if browsers.exists() else None)
+    return _PLAYWRIGHT_CACHE
 
 
 def check_chromium(browsers_path: str | None) -> str | None:

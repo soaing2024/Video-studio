@@ -47,10 +47,9 @@ python ~/.codex/skills/video-studio/scripts/vs.py selftest
 
 **四、非必要不 preview。** 不看单帧是默认状态。设计上的取舍在方案阶段就想清楚（构图、字号跳跃、色彩预算、素材是否齐备），不要靠逐拍试帧来找感觉。只有出现一个具体的、纸面上说不清的疑问时（素材到底有没有加载进来、字体回退成什么样、这个构图在实际画幅里立不立得住），才渲那一帧去回答它，并说明这一帧是为了回答什么。preview 不是全片渲染，但把每一拍都试一遍，只是换了个便宜名字的“边看边改”。
 
-**五、结构搜索，而不是一次成型。** 每一拍先出**三个结构不同**的候选（宏观结构 / 生成算子不同，
-不是配色不同），各自只做到“骨架”这一步，用 `rehearse` 或 `scrub` 横向比一次，按静帧、可讲清、
-不撞查重表、可实现四条打分，选一个继续做。落选的写进查重表，下一支不再撞。
-命令：`python vs.py shots "<这一拍的 intent>"`。
+**五、结构由代理自己定，不强制比较轮。** 从宏观结构与生成算子的词表里选**一个**方案（不同
+配色不算不同结构），只做到“骨架”这一步，再拿四条闸门自检：静帧站得住 / 一句话讲得清 /
+不在查重表里 / 能用 `seek(t)` 纯函数实现。用过的机制写回查重表，下一支不再撞。
 
 **六、逐步构图，结构先于皮肤。** 一帧分五步搭：骨架 → 层级 → 色彩 → 运动 → 质感，每步一道闸门
 （缩到 160px 还读得出来 / 第一眼落在主元素 / 转灰度层级不塌 / 关掉动效静帧成立 / 关掉 finish
@@ -66,8 +65,8 @@ python ~/.codex/skills/video-studio/scripts/vs.py selftest
 # 1. 建项目（生成一份配置 + 一个空白场景文件）
 python vs.py init 我的项目 --duration 20
 
-# 2. 每一拍先出三个结构候选，各自只做骨架，横向比一次再选
-python vs.py shots "这一拍要让观众明白什么" --brief brief.json --beat 2
+# 2. 自己定一个结构（宏观结构 + 生成算子），只做骨架，然后用四条闸门自检
+#    没有强制比较轮；词表在 references/choreography.md §2/§3
 
 # 3. 设计审计：在 35% 草稿上量四个判据（重量对比 / 节奏峰值 / 可读停顿 / 拍间布局重复）
 #    任何一项不过，改结构，不是改缓动。--ascii 让看不到图的 agent 也能读构图
@@ -93,7 +92,6 @@ python vs.py run 我的项目\project.json --jobs 3
 | `doctor [--install-ffmpeg]` | 环境检查 / 自动装 ffmpeg |
 | `brief --script 台词.txt --out brief.json` | **生成前完整规划**：分幕、分镜、视觉手段、图片提示词 |
 | `compile brief.json` | 校验规划并编译成可渲染的 project.json |
-| `shots "<intent>" [--brief b.json --beat 2]` | 一拍的结构搜索：三个结构不同的候选 + 五步构图闸门 |
 | `style [--seed N] [--swatch f.png]` | 采样/查看一套视觉方向（配色、构图、动态） |
 | `setup --provider X --key K` | 配置图片生成（任意 OpenAI 兼容平台） |
 | `imagegen "提示词" --out f.png` | 生成单张图片，或生成工程里声明的全部图片 |
@@ -385,8 +383,9 @@ BY-SA / NC / Sampling+ 默认拒绝，只有 `--allow-risky`（个人非商用�
 
 ## 长视频（5 分钟以上）
 
-**成本 = 要渲染的帧数 = 时长 × 帧率 − hold 内的帧，再除以 `slices × jobs`。** 单镜头默认单进程，
-要并行得显式加 `--slices N`；5 分钟 1080p/30fps 是 9000 帧（未扣 hold），具体墙钟用
+**成本 = 要渲染的帧数 = 时长 × 帧率 − hold 内的帧。** 无论多长，默认都是**单进程**；
+`--slices N`（或 `render.slices`）是显式要求才会启用的选项，不是默认路径。
+5 分钟 1080p/30fps 是 9000 帧（未扣 hold），具体墙钟用
 `vs.py plan` 按你的机器估。以前可以靠"静态段落"省钱，现在没有段落了，改成在**镜头内部**声明静止：
 
 ```jsonc
@@ -456,7 +455,7 @@ python scripts/design_audit.py draft.mp4 --project my-video/project.json --ascii
 python scripts/taste_check.py my-video/my-video.mp4     # 渲染后：节奏 + 构图
 ```
 
-四份配套文档：`references/taste.md`（审美闸门与 AI 味黑名单）、`references/rhythm-handoff.md`（“PPT 感”的三个根因与解法）、`references/motion-realism.md`（7 行运动设定、12 条真实感钩子、情绪→参数）、`references/motion-design.md`（闸门全绿之后为什么还是难看：四个判据、三候选结构搜索、快闪的真实定义）。
+四份配套文档：`references/taste.md`（审美闸门与 AI 味黑名单）、`references/rhythm-handoff.md`（“PPT 感”的三个根因与解法）、`references/motion-realism.md`（7 行运动设定、12 条真实感钩子、情绪→参数）、`references/motion-design.md`（闸门全绿之后为什么还是难看：四个判据、快闪的真实定义、重量与停顿的标定）。
 
 ## 高级技法提示词库
 
@@ -500,8 +499,9 @@ python scripts/taste_check.py my-video/my-video.mp4     # 渲染后：节奏 + �
 ## 常见问题
 
 **改了配置要重渲全部吗？**
-不用。缓存键包含场景文件内容、数据、素材修改时间和输出规格；加了 `--slices N` 后每个时间片
-各有缓存键，渲染器还会用降采样的签名探针找出真正变化的切片，只重渲那些切片。
+不用。缓存键包含场景文件内容、数据、素材修改时间、尺寸/帧率、hold 窗口、编码参数与
+vendored 库指纹；`--incremental` 会先用降采样的状态签名找出没变的切片，但**只有签名与
+“非场景输入”同时未变才会复用**（否则复用的旧画面会被盖章成新缓存）。
 强制重渲加 `--force`。
 
 **中间文件在哪？能删吗？**

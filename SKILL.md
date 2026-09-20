@@ -67,11 +67,14 @@ render time is spent.
 
 1. `probe` the source assets: size, alpha coverage, dominant colours, duration, loudness.
 2. Write a project spec (JSON; `//` comments allowed).
-3. Search the structure before writing the shot: three candidates that differ in macrostructure
-   or generative operator, each taken only to pass 1 (blocking) and rehearsed as a 4 s draft,
-   compared with `python scripts/design_audit.py draft.mp4 --times 1,2.2,3.4 --ascii` before one
-   is chosen. This is the step that catches a film whose every gate is green and which still
-   reads badly ([references/motion-design.md](references/motion-design.md)).
+3. Decide the structure yourself: one macrostructure and one generative operator, sketched to
+   pass 1 (blocking) only, on paper. There is no mandated comparison round - the vocabulary in
+   [references/choreography.md](references/choreography.md) §2/§3 exists to widen the choice,
+   not to force three parallel sketches. What you must do is hold the result to the four gates
+   (still frame / one sentence / not in the graveyard / implementable from `t`) and then audit
+   the draft with `python scripts/design_audit.py <draft>.mp4 --ascii` - the step that catches a
+   film whose every other gate is green and which still reads badly
+   ([references/motion-design.md](references/motion-design.md)).
 4. Write the seven-line motion spec and declare the handoffs in `data.beats`, then audit them:
    `python scripts/beat_audit.py project.json` fails on exit-then-enter gaps, over-long moves and
    weak overlaps - the three causes of a slide-deck feel
@@ -98,7 +101,6 @@ Every command accepts `--json`, `--verbose` and `--quiet`; failures return
 | `doctor [--install-ffmpeg]` | runtime check: node, playwright, chromium, ffmpeg codecs, python deps |
 | `brief --script s.txt --out brief.json` | plan the whole video before rendering anything |
 | `compile brief.json` | validate a brief and emit project.json |
-| `shots "intent" [--brief b.json --beat 2]` | three structurally different candidates for one beat, plus the five composition passes |
 | `style [--seed N] [--swatch f.png]` | sample or inspect a visual direction |
 | `setup --provider X --key K` | configure image generation (any OpenAI-compatible API) |
 | `imagegen "prompt" --out f.png` | generate one image, or every image a project needs |
@@ -120,9 +122,9 @@ Every command accepts `--json`, `--verbose` and `--quiet`; failures return
 | `preview <project> [--segment id] [--at 2.0]` | one still frame, only for a doubt paper cannot settle |
 | `rehearse <project> [--at a:b] [--scale 0.35] [--fps 12]` | cheap draft you can watch, plus a contact sheet; never touches the delivery clips |
 | `scrub <project> [--open]` | interactive page driving the real scene: play, step frames, safe areas - no render at all |
-| `render <project> [--jobs N] [--slices N] [--force]` | render cached clips only |
+| `render <project> [--jobs N] [--force]` | render cached clips only (one process; `--slices N` is opt-in) |
 | `assemble <project> [--out f.mp4]` | cut, transition, mix, encode only |
-| `run <project> [--jobs N] [--slices N]` | all three, prints a JSON summary |
+| `run <project> [--jobs N]` | all three, prints a JSON summary (`--slices N` opt-in) |
 | `verify <project>` | measured acceptance report |
 | `selftest [--keep]` | tiny project end to end, as a regression check |
 
@@ -251,6 +253,10 @@ pass, and the list of skeletons that are already used up:
   the end without a single cut. Change of scene is a transformation inside the shot, not an edit.
   Declare genuinely static stretches as `hold` windows - the renderer reuses one frame for them, and
   that is the only cost lever a single take has left.
+- **Never slice unless asked.** A take renders in ONE process, however long it is. `--slices N`
+  and `render.slices` are opt-in, for when someone explicitly wants one take spread across
+  parallel processes. The default must stay one process: long-form cost is managed with `hold`
+  windows, and the safest take is the one that was never split.
 - **Compose the shot, do not fill a template.** Every shot is authored for this video: pick the
 - **Contrast is what the gates cannot see.** A take where every beat carries the same weight reads
   as bland however clean its measurements are. It needs at least one beat that is dense (>=12%
@@ -284,11 +290,11 @@ pass, and the list of skeletons that are already used up:
 - **Sound effects carry their licence.** `vs.py sfx` searches Freesound CC0-only by default,
   converts what it fetches to 48 kHz wav, and appends a `CREDITS.md` row; CC BY is opt-in with
   `--licence by`, and BY-SA / NC / Sampling+ need `--allow-risky` (never for a commercial cut).
-- **Search, do not one-shot.** Before writing a scene, run `vs.py shots "<intent>"` and keep three
-  candidates that differ on macrostructure and generative operator - three colourways of one
-  layout is not a search. Sketch each to pass 1 (blocking) only, compare them with `rehearse` /
-  `scrub`, score them (still frame / one sentence / not in the graveyard / implementable from `t`),
-  then build the winner; the losers go into the §7 graveyard.
+- **You choose the structure; no comparison round is required.** Pick one macrostructure and one
+  generative operator for this video (the vocabulary is in `references/choreography.md` §2/§3),
+  sketch it to pass 1 only, and hold it to the four gates: still frame / one sentence / not in the
+  §7 graveyard / implementable as a pure function of `t`. Record what you used in the graveyard
+  so the next film does not wear the same skeleton.
 - **Build the frame in passes.** Blocking, then hierarchy, colour, motion, finish, each behind its
   own gate. Passes 3-5 are gated behind 1-2: surface polish cannot rescue a structure that never
   held ([references/choreography.md](references/choreography.md) §1.5, §4.0).
@@ -334,15 +340,15 @@ pass, and the list of skeletons that are already used up:
   and how to vendor them offline, plus design and storyboarding vocabulary with copy-ready
   prompts: [references/prompts.md](references/prompts.md). Written in Chinese, because it is
   aimed at the Chinese-language tutorial ecosystem.
-- How to compose a shot for this video instead of selecting a template - the three-candidate
-  structure search, the five composition passes, the macrostructures, the six generative
+- How to compose a shot for this video instead of selecting a template - the macrostructure and
+  generative-operator vocabularies, the five composition passes, the six generative
   operators for inventing a mechanic, motion tokens, the twelve timeline laws, the slop gates
   and the used-skeleton graveyard:
   [references/choreography.md](references/choreography.md). Written in Chinese.
 - Aesthetic gates - proportion, type-scale jump, colour budget, ink ratio, reference traditions
   and the AI-slop blacklist: [references/taste.md](references/taste.md). Written in Chinese.
 - Why a take that passes every gate can still read badly - missing contrast in weight, rhythm and
-  density, readable pauses, the three-candidate structure search, and the ASCII frame reader that
+  density, readable pauses, and the ASCII frame reader that
   lets an agent judge composition without seeing an image:
   [references/motion-design.md](references/motion-design.md). Written in Chinese.
 - The slide-deck failure - two-ended easing, exit-then-enter gaps, whole-frame replacement, and

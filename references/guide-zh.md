@@ -32,7 +32,7 @@ python vs.py init 我的项目 --duration 20
 
 # 3. 先自检与预算，不花渲染时间
 python vs.py check 我的项目\project.json
-python vs.py plan  我的项目\project.json --slices 6 --jobs 3
+python vs.py plan  我的项目\project.json            # 默认单进程；--slices 仅在明确要求时加
 
 # 4. 设计审计：在 35% 草稿上量四个判据（重量对比 / 节奏峰值 / 可读停顿 / 拍间布局重复）
 #    任何一项不过就改结构，不是改缓动；--ascii 逐拍打出墨迹图，看不到图的 agent 靠它读构图
@@ -42,8 +42,8 @@ python scripts\design_audit.py 草稿.mp4 --project 我的项目\project.json --
 # 5.（可选，非必要不做）纸面判断不了的疑问才渲一帧
 python vs.py preview 我的项目\project.json --at 2.5
 
-# 6. 出片：渲染 + 剪辑 + 验收（一次成片）
-python vs.py run 我的项目\project.json --slices 6 --jobs 3
+# 6. 出片：渲染 + 剪辑 + 验收（一次成片；无论多长都不默认切片）
+python vs.py run 我的项目\project.json --jobs 3
 ```
 
 `run` 会打印一份 JSON 验收报告。**任何一项 `ok: false` 就说明有问题**，`detail` 会告诉你该调哪个参数。
@@ -76,7 +76,7 @@ hold 里的帧渲染器直接复用，**成本与时长无关**。经验值：5 
 其余全部 hold；用 `vs.py plan` 看 `frames_to_render`。
 
 渲染速度别背数字：`vs.py plan` 会按你的机器、分辨率与 hold 拆分给出 `ms_per_frame` 与墙钟估计。
-单镜头默认是单进程，加了 `--slices N --jobs M` 才会按时间切片并行（合并时校验总帧数）。
+单镜头**默认永远单进程**，多长都一样；`--slices N` 是显式要求才会启用的并行手段（合并时校验总帧数）。
 像素风（320×180 渲染再整数倍放大）与 hold 区间仍是两个最有效的省钱手段。
 
 ## 常用搭配

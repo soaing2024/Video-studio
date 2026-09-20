@@ -43,6 +43,46 @@ def configured(spec: dict) -> bool:
     return bool((spec.get("narration") or {}).get("lines"))
 
 
+def _declared_seconds(value):
+    """The duration a segment already declares, or None when it is `auto`/missing."""
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str) and value.replace(".", "", 1).isdigit():
+        return float(value)
+    return None
+
+
+def _entries(cfg: dict, segs: dict) -> list[dict]:
+    """Normalise narration.lines into synthesis entries with stable ids.
+
+    A segment may now carry several lines (one per chapter of a brief). Each entry gets its
+    own file stamp id, so the TTS cache still only re-synthesizes the lines whose text changed.
+    """
+    entries: list[dict] = []
+    for i, line in enumerate(cfg.get("lines") or []):
+        sid = line.get("segment")
+        text = str(line.get("text") or "").strip()
+        if not text:
+            continue
+        if sid not in segs:
+            raise ValueError(f"narration references unknown segment: {sid!r}")
+        at = line.get("at")
+        entries.append({
+            "segment": sid,
+            "text": text,
+            "at": None if at is None else float(at),
+            "chapter": line.get("chapter"),
+            "index": i,
+        })
+    per_segment: dict[str, int] = {}
+    for e in entries:
+        per_segment[e["segment"]] = per_segment.get(e["segment"], 0) + 1
+    for e in entries:
+        e["id"] = (e["segment"] if per_segment[e["segment"]] == 1
+                   else f"{e['segment']}-{e['index']:02d}")
+    return entries
+
+
 def apply(spec: dict, ffmpeg: str, force: bool = False, log=print) -> dict:
     """Synthesize (if needed), then rewrite durations, audio and subtitles in place."""
     cfg = spec.get("narration") or {}
@@ -64,36 +104,45 @@ def apply(spec: dict, ffmpeg: str, force: bool = False, log=print) -> dict:
 
     lines = {l["segment"]: l["text"] for l in cfg["lines"]}
     segs = specmod.segment_map(spec)
-    unknown = [s for s in lines if s not in segs]
-    if unknown:
-        raise ValueError(f"narration references unknown segments: {unknown}")
+    entries = _entries(cfg, segs)
+    if not entries:
+        return {"applied": False}
 
     # 1. synthesize each line once
     clips: dict[str, tuple[Path, float]] = {}
-    for sid, text in lines.items():
-        raw = voice_dir / f"{sid}.raw.wav"
-        wav = voice_dir / f"{sid}.wav"
-        stamp = voice_dir / f"{sid}.stamp"
-        want = _hash(f"{voice}|{rate}|{text}")
+    # per line, not per segment, so one edited chapter does not invalidate the rest of the voice.
+    for e in entries:
+        raw = voice_dir / f"{e['id']}.raw.wav"
+        wav = voice_dir / f"{e['id']}.wav"
+        stamp = voice_dir / f"{e['id']}.stamp"
+        want = _hash(f"{voice}|{rate}|{e['text']}")
         if force or not wav.is_file() or not stamp.is_file() or stamp.read_text().strip() != want:
-            log(f"  tts {sid} ({len(text)} chars, voice {voice})")
-            tts.synthesize(text, str(raw), voice=voice, rate=rate)
+            log(f"  tts {e['id']} ({len(e['text'])} chars, voice {voice})")
+            tts.synthesize(e["text"], str(raw), voice=voice, rate=rate)
             _normalise_wav(ffmpeg, raw, wav)
             stamp.write_text(want)
         info = probe.media(ffmpeg, str(wav))
-        clips[sid] = (wav, float(info.get("duration") or 0.0))
+        clips[e["id"]] = (wav, float(info.get("duration") or 0.0))
 
     # 2. durations follow the voice
-    for sid in lines:
-        seg = segs[sid]
-        needed = lead_in + clips[sid][1] + tail + gap
-        declared = seg.get("duration")
-        if isinstance(declared, (int, float)) or (isinstance(declared, str) and declared.replace('.', '', 1).isdigit()):
-            seg["duration"] = round(max(float(declared), needed), 3)
-        else:
-            seg["duration"] = round(max(min_duration, needed), 3)
 
-    # 3. where does each timeline item start, and when does the voice speak
+    # 2. place every line on the absolute take clock, then let the durations follow the voice
+    starts = specmod.segment_starts(spec)
+    events: list[dict] = []
+    for e in entries:
+        start = starts.get(e["segment"], 0.0)
+        place = start + lead_in if e["at"] is None else float(e["at"])
+        events.append({**e, "start": start, "place": place,
+                       "clip": clips[e["id"]][0], "seconds": clips[e["id"]][1]})
+    events.sort(key=lambda e: (e["place"], e["id"]))
+
+    for e in events:
+        seg = segs[e["segment"]]
+        needed = (e["place"] - e["start"]) + e["seconds"] + tail + gap
+        declared = _declared_seconds(seg.get("duration"))
+        seg["duration"] = (round(max(declared, needed), 3) if declared is not None
+                           else round(max(min_duration, needed), 3))
+
     starts = specmod.segment_starts(spec)
     total = specmod.planned_duration(spec)
 
@@ -101,7 +150,6 @@ def apply(spec: dict, ffmpeg: str, force: bool = False, log=print) -> dict:
     parts: list[Path] = []
     written = 0.0
     cue_times: list[tuple[float, float, str]] = []
-    seen: dict[str, int] = {}
     sil_cache: dict[int, Path] = {}
 
     def silence_for(seconds: float) -> Path:
@@ -113,28 +161,56 @@ def apply(spec: dict, ffmpeg: str, force: bool = False, log=print) -> dict:
             sil_cache[key] = path
         return sil_cache[key]
 
-    for item in spec["timeline"]:
-        sid = item.get("segment")
-        if sid not in lines:
-            continue
-        idx = seen.get(sid, 0)
-        seen[sid] = idx + 1
-        clip_path, clip_len = clips[sid]
-        if idx == 0:
-            start = starts.get(sid, written)
-            speak_at = start + lead_in
-            if speak_at > written + 0.005:
-                parts.append(silence_for(speak_at - written))
-                written = speak_at
-            parts.append(clip_path)
-            written += clip_len
-            cue_times.append((speak_at, speak_at + clip_len, lines[sid]))
+    for e in events:
+        if e["place"] > written + 0.005:
+            parts.append(silence_for(e["place"] - written))
+            written = e["place"]
+        elif e["place"] < written - 0.005:
+            # The voice cannot be in two places at once. Chapters are authored before the TTS
+            # durations are known, so a slow reading can overrun its slot; push this line to
+            # the first free moment and say so rather than writing overlapping samples.
+            log(f"  narration: '{e['id']}' overruns its slot by {written - e['place']:.2f}s; "
+                f"pushed to {written:.2f}s")
+            e["place"] = written
+        parts.append(e["clip"])
+        written += e["seconds"]
+        cue_times.append((max(0.0, e["place"]), e["place"] + e["seconds"], e["text"]))
 
     if total > written + 0.01:
         parts.append(silence_for(total - written))
 
     voice_track = voice_dir / "voice.wav"
     _concat(ffmpeg, parts, voice_track, voice_dir)
+
+    # 5. if the scene was compiled from a brief, its chapter table is what the picture follows.
+    #    Rewrite it from the actual voice placement so picture, voice and subtitles agree.
+    chapters_updated = 0
+    for e in events:
+        seg = segs.get(e["segment"]) or {}
+        timeline = (seg.get("data") or {}).get("timeline")
+        if not isinstance(timeline, list) or not timeline:
+            continue
+        row = None
+        if e.get("chapter") is not None:
+            row = next((c for c in timeline if c.get("index") == e["chapter"]), None)
+        if row is None:
+            row = next((c for c in timeline
+                        if c.get("at") is not None
+                        and abs(float(c.get("at")) - float(e["place"])) < 0.001), None)
+        if row is not None:
+            row["at"] = round(float(e["place"]), 3)
+            row["seconds"] = round(float(e["seconds"]) + tail, 3)
+            chapters_updated += 1
+    if chapters_updated:
+        for seg in segs.values():
+            timeline = (seg.get("data") or {}).get("timeline")
+            if not isinstance(timeline, list) or not timeline:
+                continue
+            rows = sorted((c for c in timeline if c.get("at") is not None),
+                          key=lambda c: float(c["at"]))
+            for i, row in enumerate(rows):
+                end = float(rows[i + 1]["at"]) if i + 1 < len(rows) else total
+                row["seconds"] = round(max(0.5, end - float(row["at"])), 3)
 
     # 5. subtitles
     srt = None
@@ -156,9 +232,11 @@ def apply(spec: dict, ffmpeg: str, force: bool = False, log=print) -> dict:
 
     manifest = {
         "voice": voice, "rate": rate, "total": round(total, 3),
-        "lines": [{"segment": s, "text": t, "chars": len(t),
-                   "seconds": round(clips[s][1], 3)} for s, t in lines.items()],
+        "lines": [{"segment": e["segment"], "text": e["text"], "chars": len(e["text"]),
+                   "seconds": round(e["seconds"], 3), "at": round(e["place"], 3)}
+                  for e in events],
         "voice_track": str(voice_track), "subtitles": str(srt) if srt else None,
+        "chapters_updated": chapters_updated,
     }
     (voice_dir / "narration.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")

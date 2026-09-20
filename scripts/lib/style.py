@@ -324,6 +324,12 @@ def report(spec: dict) -> dict:
         scored = [(similarity(sig, e.get("signature") or {}), e.get("name", "?")) for e in past]
         scored.sort(reverse=True)
         closest = {"name": scored[0][1], "similarity": scored[0][0]}
+    # A one-take project has exactly one layout slot, so "distinct layouts >= 2" can never hold.
+    # The verdict is only meaningful once there are enough beats to compare (>= 3).
+    enough_beats = len(segs) >= 3
+    repetitive = enough_beats and (adjacent_repeat > 0
+                                 or len(set(layouts)) < max(2, len(segs) // 3))
+    verdict = "too repetitive" if repetitive else "ok"
     return {
         "seed": sig.get("seed"),
         "palette": sig.get("palette_name"),
@@ -335,6 +341,5 @@ def report(spec: dict) -> dict:
         "distinct_transitions": len({t for t in transitions if t != "cut"}),
         "adjacent_layout_repeats": adjacent_repeat,
         "closest_past_project": closest,
-        "verdict": ("ok" if adjacent_repeat == 0 and len(set(layouts)) >= max(2, len(segs) // 3)
-                    else "too repetitive"),
+        "verdict": verdict,
     }

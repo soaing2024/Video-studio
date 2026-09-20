@@ -17,21 +17,30 @@ from __future__ import annotations
 import argparse
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
-VENDORED = Path(__file__).resolve().parent.parent / "vendor" / "ffmpeg-win-x86_64-v7.1.exe"
 FROZEN_DELTA = 1.0      # 0-255 grey levels between adjacent frames
 INK = 245               # anything below this counts as ink
 
 
 def ffmpeg_path() -> str:
-    if VENDORED.is_file():
-        return str(VENDORED)
-    found = shutil.which("ffmpeg")
-    if not found:
-        raise SystemExit("error: no ffmpeg found")
-    return found
+    """The skill's runtime resolver, with a PATH fallback for standalone use.
+
+    This used to hardcode `vendor/ffmpeg-win-x86_64-v7.1.exe`, so any other build name or
+    platform silently fell back to PATH - which is exactly where the Playwright ffmpeg (VP8 and
+    PNG only) lives, the trap runtime.py exists to avoid.
+    """
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from lib import runtime
+        return runtime.find_ffmpeg()
+    except Exception:
+        found = shutil.which("ffmpeg")
+        if not found:
+            raise SystemExit("error: no ffmpeg found (checked the skill vendor folder and PATH)")
+        return found
 
 
 def tag_low(value: float, good: float, ok: float, unit: str = "") -> str:

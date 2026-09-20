@@ -99,7 +99,12 @@ def main() -> int:
             print("  ! GAP %.2fs before '%s' -- exit-then-enter, the slide signature"
                   % (gap, cur["name"]))
         elif -gap < HANDOFF_MIN:
-            print("  ! weak handoff (%.2fs overlap) before '%s' -- aim for 40-60%% of a move"
+            # A problem, not a footnote: references/rhythm-handoff.md requires at least
+            # HANDOFF_MIN of overlap, and a weak handoff reads as a page turn just as surely as a
+            # gap does. This used to print a warning and still exit 0.
+            problems.append("weak handoff of %.2fs before '%s' (min %.2fs)"
+                            % (-gap, cur["name"], HANDOFF_MIN))
+            print("  ! WEAK handoff (%.2fs overlap) before '%s' -- aim for 40-60%% of a move"
                   % (-gap, cur["name"]))
 
     lo = min(w[0] for b in parsed for w in (b["in"], b["out"]) if w)

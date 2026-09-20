@@ -6,8 +6,8 @@ and it runs from t=0 to the end.
 
 ## 1. The budget is frames, and holds are the only lever
 
-Cost = frames to render = `duration × fps` minus the frames inside `hold` windows, divided by
-`slices × jobs` (a single take renders in one process unless you pass `--slices`). A 5-minute
+Cost = frames to render = `duration × fps` minus the frames inside `hold` windows, rendered in a
+single process (`--slices N` is opt-in and only when explicitly asked for). A 5-minute
 take at 1920×1080/30fps is 9000 frames before holds; `vs.py plan` turns that into wall clock for
 your machine. There is no "make this bit a still segment" escape any more, so the take declares
 it instead:
@@ -106,7 +106,8 @@ bottom band, and compare with a frame between cues.
 
 ## 7. Re-editing
 
-The take is cached in slices under `--slices`: a signature pass finds which slices actually
-changed, so an edit re-renders only those, and a crash only re-renders what is missing (change
-the **hold windows** and only the cost changes). During development, render at 1280×720 with
+The take's clip is cached as a whole; with the opt-in `--slices` + `--incremental` pair a
+signature pass finds which slices are provably unchanged (unchanged frames *and* unchanged
+non-scene inputs), so an edit re-renders only those, and a crash only re-renders what is missing
+(change the **hold windows** and only the cost changes). During development, render at 1280×720 with
 `fps: 12` to get the timing right, then set the delivery format and render once.

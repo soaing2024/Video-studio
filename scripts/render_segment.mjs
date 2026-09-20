@@ -114,7 +114,24 @@ async function boot() {
 }
 
 // DOM truth for the preview channel: what is actually visible, where, and how legible.
+// NOTE: everything PROBE needs must live *inside* the arrow function below. page.evaluate()
+// serialises the function source and runs it in the page, so a module-level helper would be
+// referenced but never defined there.
+
 const PROBE = () => {
+  // Walk up to the first opaque background: an element's own background is usually transparent
+  // (the plate lives on an ancestor), and stopping at the element made light-on-dark captions
+  // measure as light-on-white - a false contrast failure on every dark project.
+  function effectiveBg(node) {
+    let n = node;
+    while (n && n.nodeType === 1) {
+      const bg = getComputedStyle(n).backgroundColor;
+      const m = /rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/.exec(bg || "");
+      if (m && (m[4] === undefined || parseFloat(m[4]) >= 0.5)) return bg;
+      n = n.parentElement;
+    }
+    return getComputedStyle(document.body).backgroundColor || "rgb(255,255,255)";
+  }
   const out = [];
   for (const e of document.querySelectorAll("div,span,svg,canvas")) {
     const cs = getComputedStyle(e);
@@ -131,9 +148,11 @@ const PROBE = () => {
     const text = e.children.length === 0 ? (e.textContent || "").trim() : "";
     if (!text && !e.classList.contains("p") && e.tagName !== "CANVAS") continue;
     out.push({ tag: e.tagName.toLowerCase(), cls: String(e.className).slice(0, 32),
-               text: text.slice(0, 48), x: +r.x.toFixed(1), y: +r.y.toFixed(1),
+               id: e.id || "", text: text.slice(0, 48),
+               x: +r.x.toFixed(1), y: +r.y.toFixed(1),
                w: +r.width.toFixed(1), h: +r.height.toFixed(1),
-               fs: Math.round(parseFloat(cs.fontSize) || 0), color: cs.color, bg: cs.backgroundColor });
+               fs: Math.round(parseFloat(cs.fontSize) || 0), color: cs.color,
+               bg: cs.backgroundColor, bgEff: effectiveBg(e) });
     if (out.length >= 400) break;
   }
   return { viewport: { w: innerWidth, h: innerHeight }, elements: out, page_errors: [] };

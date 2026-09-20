@@ -56,6 +56,45 @@ def _ffmpeg() -> str:
     return runtime.find_ffmpeg()
 
 
+def _render_overrides(args) -> dict:
+    """CLI render knobs -> `spec.render` overrides (see render.apply_render_overrides).
+
+    Only flags the user actually passed are forwarded: an absent `--jpeg` must not silently
+    become `jpeg=0`, and an absent `--incremental` must not turn off a project that asked
+    for it in its own spec.
+    """
+    out: dict = {}
+    if getattr(args, "preset", None):
+        out["preset"] = args.preset
+    if getattr(args, "jpeg", None):
+        out["jpeg"] = args.jpeg
+    if getattr(args, "reboot", None):
+        out["reboot"] = args.reboot
+    if getattr(args, "no_gpu", False):
+        out["gpu"] = False
+    if getattr(args, "incremental", False):
+        out["incremental"] = True
+    return out
+
+
+def _remember_style(spec: dict) -> None:
+    """Record this project's visual direction so `style --history` has something to compare.
+
+    `style.remember()` existed but had no caller, so the history file stayed empty and
+    `closest_past_project` was always null - a distinctiveness feature that never ran.
+    """
+    sig = (spec.get("style") or {}).get("signature")
+    if not sig:
+        return
+    try:
+        past = style.load_history()
+        if past and past[-1].get("signature") == sig and past[-1].get("name") == spec.get("name"):
+            return
+        style.remember({"name": spec.get("name"), "signature": sig})
+    except Exception:
+        pass        # history is a nicety; never let it fail a delivery
+
+
 def load_spec(path, want_narration: bool = True, seed: int | None = None) -> dict:
     """Load a project and resolve the two things that must agree across every command:
     the visual direction (from the style seed) and the narration timing.
@@ -154,37 +193,6 @@ def cmd_sfx(args) -> int:
     return 0 if rep.get("ok") else 1
 
 
-def cmd_shots(args) -> int:
-    """Structurally different candidates for one beat: search before writing the shot."""
-    intent = (args.intent or "").strip()
-    meta = {}
-    if args.brief:
-        try:
-            brief = brief_mod.load(args.brief)
-        except Exception as e:      # a project.json is not a brief.json
-            raise fmt.fail("BAD_BRIEF", args.brief, "a brief.json", str(e)[:120],
-                           "produce one with: vs.py brief --script <file> --out brief.json")
-        beats = ((brief.get("take") or {}).get("timeline")
-                 or brief.get("structure") or brief.get("timeline") or [])
-        if not beats:
-            raise fmt.fail("NO_BEATS", args.brief, "a brief with a timeline", "empty",
-                           "run `vs.py brief --script <file> --out brief.json` first")
-        want = int(args.beat or 1)
-        beat = next((b for b in beats if int(b.get("index") or 0) == want), None)
-        if beat is None:
-            beat = beats[min(max(want, 1), len(beats)) - 1]
-        intent = intent or str(beat.get("intent") or beat.get("on_screen") or "").strip()
-        meta = {"beat": beat.get("index"), "on_screen": beat.get("on_screen"),
-                "device": beat.get("device"), "seconds": beat.get("seconds"),
-                "brief": args.brief}
-    if not intent:
-        raise fmt.fail("NO_INTENT", "vs.py shots", "one sentence of intent", "empty",
-                       'try: vs.py shots "这一拍要让观众明白什么"')
-    rep = choreography.candidates(intent, count=args.count, seed=args.seed,
-                                  duration=args.duration)
-    rep.update(meta)
-    fmt.emit(rep, human=choreography.candidates_human(rep))
-    return 0
 
 
 
@@ -293,7 +301,7 @@ def cmd_compile(args) -> int:
               "hint": "fix the errors, or pass --force to compile anyway"})
         return 1
     spec = brief_mod.compile_brief(brief, music=args.music,
-                                   progress_bar=not args.no_progress)
+                                   progress_bar=not args.no_progress, force=args.force)
     out = Path(args.out) if args.out else Path(args.brief).with_name("project.json")
     out.write_text(json.dumps(spec, ensure_ascii=False, indent=2), encoding="utf-8")
     emit({"ok": True, "project": str(out), "duration": spec["duration"],
@@ -371,13 +379,14 @@ def cmd_render(args) -> int:
     ffmpeg, node = _ffmpeg(), runtime.find_node()
     results = render.render_all(spec, ffmpeg, node, jobs=args.jobs, force=args.force,
                                 slices=getattr(args, "slices", None),
-                                incremental=getattr(args, "incremental", None), log=fmt.note)
+                                overrides=_render_overrides(args), log=fmt.note)
     emit({"segments": results, "build_dir": str(render.build_dir(spec))})
     return 0
 
 
 def cmd_assemble(args) -> int:
     spec = spec_from(args)
+    _remember_style(spec)
     emit(assemble.assemble(spec, _ffmpeg(), out_path=args.out))
     return 0
 
@@ -418,17 +427,22 @@ def cmd_preview(args) -> int:
 
 def cmd_run(args) -> int:
     spec = spec_from(args)
+    _remember_style(spec)
     ffmpeg, node = _ffmpeg(), runtime.find_node()
-    log = (lambda m: print(m, file=sys.stderr)) if args.quiet else (lambda m: print(m, file=sys.stderr))
-    print(f"[1/3] render {len(render.pending(spec))} segment(s)", file=sys.stderr)
+    quiet = bool(getattr(args, "quiet", False))
+    log = (lambda m: None) if quiet else (lambda m: print(m, file=sys.stderr))
+    if not quiet:
+        print(f"[1/3] render {len(render.pending(spec))} segment(s)", file=sys.stderr)
     render.render_all(spec, ffmpeg, node, jobs=args.jobs, force=args.force, log=log,
-                       slices=getattr(args, "slices", None),
-                       incremental=getattr(args, "incremental", None))
-    print("[2/3] assemble", file=sys.stderr)
+                      slices=getattr(args, "slices", None),
+                      overrides=_render_overrides(args))
+    if not quiet:
+        print("[2/3] assemble", file=sys.stderr)
     result = assemble.assemble(spec, ffmpeg, log=log)
     summary = {"output": result["output"], "duration": result["duration"]}
     if not args.skip_verify:
-        print("[3/3] verify", file=sys.stderr)
+        if not quiet:
+            print("[3/3] verify", file=sys.stderr)
         report = verify.verify(spec, ffmpeg, video=result["output"], samples=args.samples)
         summary["verify"] = report
         summary["ok"] = report["ok"]
@@ -481,56 +495,6 @@ def cmd_montage(args) -> int:
     return 0
 
 
-def cmd_plan(args) -> int:
-    spec = spec_from(args)
-    issues = specmod.validate(spec)
-    w, h, scale = render.work_size(spec)
-    fps = spec["video"]["fps"]
-    ms_per_frame = 63 + 0.000127 * (w * h)   # fitted from measurements in pipeline.md
-    frames = animated = still = cached = 0
-    rows = []
-    for seg in render.pending(spec):
-        f = int(round(float(seg["duration"]) * fps))
-        is_still = bool((seg.get("data") or {}).get("still"))
-        hit = False
-        try:
-            path = render.segment_path(spec, seg["id"])
-            key = path.with_suffix(".key")
-            hit = bool(path.is_file() and key.is_file()
-                       and key.read_text().strip() == render.cache_key(spec, seg))
-        except OSError:
-            hit = False
-        cached += int(hit)
-        # A take can declare still stretches; those frames are reused, so they are not render cost.
-        held = sum(max(0.0, float(b) - float(a)) for a, b in (seg.get("hold") or []))
-        held_frames = int(round(held * fps))
-        if is_still:
-            still += 1
-        else:
-            animated += 1
-            frames += max(0, f - held_frames)
-        rows.append({"segment": seg["id"], "scene": Path(seg["scene"]).name,
-                     "seconds": seg["duration"], "frames": 0 if is_still else f - held_frames,
-                     "hold": round(held, 2), "still": is_still, "cached": hit})
-    jobs = max(1, min(int(spec["render"].get("jobs", 2)), os.cpu_count() or 4))
-    seconds = frames * ms_per_frame / 1000 / jobs * 1.15
-    errors = [i for i in issues if i["level"] == "error"]
-    emit({
-        "name": spec["name"],
-        "duration": specmod.planned_duration(spec),
-        "work_size": [w, h], "upscale": scale,
-        "segments": rows,
-        "animated": animated, "still": still, "cached": cached,
-        "frames_to_render": frames,
-        "estimated_render": {"jobs": jobs, "seconds": round(seconds, 1),
-                             "minutes": round(seconds / 60, 1)},
-        "output": str(Path(spec["base_dir"]) / (spec["name"] + ".mp4")),
-        "style": style.report(spec),
-        "choreography": choreography.report(spec),
-        "issues": issues,
-        "ok": not errors,
-    })
-    return 0 if not errors else 1
 
 
 SELFTEST_PROJECT = {
@@ -672,14 +636,6 @@ def build_parser() -> argparse.ArgumentParser:
     sf.add_argument("--dry-run", action="store_true", help="print the request, send nothing")
     sf.set_defaults(func=cmd_sfx)
 
-    sh = sub.add_parser("shots", help="three structurally different candidates for one beat")
-    sh.add_argument("intent", nargs="?", help="one sentence: what the viewer must understand")
-    sh.add_argument("--brief", help="read the beat from a brief.json instead")
-    sh.add_argument("--beat", type=int, help="beat index in that brief (default 1)")
-    sh.add_argument("--count", type=int, default=3, help="candidates to generate (2-5)")
-    sh.add_argument("--seed", type=int, help="fix the candidate set")
-    sh.add_argument("--duration", type=float, help="beat length, for the pass plan")
-    sh.set_defaults(func=cmd_shots)
 
     ini = sub.add_parser("init", help="scaffold a project directory")
     ini.add_argument("dir", nargs="?", default=".")
@@ -804,7 +760,7 @@ def build_parser() -> argparse.ArgumentParser:
     pl = sub.add_parser("plan", help="dry run: problems, cache hits, estimated render time")
     pl.add_argument("project")
     pl.add_argument("--seed", type=int, help="override the style seed")
-    pl.set_defaults(func=cmd_plan)
+    pl.set_defaults(func=_cmd_plan_v2)
 
     st = sub.add_parser("selftest", help="run a tiny project end to end")
     st.add_argument("--jobs", type=int)
@@ -835,52 +791,86 @@ def _cmd_preview_dispatch(args) -> int:
 
 
 def _cmd_plan_v2(args) -> int:
-    """Budget before render: estimated wall clock, memory-safe concurrency, fallbacks."""
+    """Budget before render: wall clock, memory-safe concurrency, and the design verdicts.
+
+    This is the plan that actually runs (`build_parser` points `plan` straight at it). It used
+    to be a patch on top of a v1 that had already been shadowed, which is how the documented
+    style/choreography verdicts quietly stopped being reported: the code that produced them
+    was dead, and the code that ran never had them. They are back here, beside the budget.
+    """
     spec = spec_from(args)
+    spec = render.apply_render_overrides(spec, _render_overrides(args))
     issues = specmod.validate(spec)
     w, h, _ = render.work_size(spec)
-    frames = int(round(float(spec["duration"]) * spec["video"]["fps"]))
+    fps = spec["video"]["fps"]
     shutter = render.shutter_samples(spec)
-    frames = int(round(float(spec["duration"]) * spec["video"]["fps"])) * shutter
-    slices = int(getattr(args, "slices", 1) or 1)
-    jobs = render.safe_jobs(w, h, int(getattr(args, "jobs", 0) or spec["render"].get("jobs", 2)),
-                            log=fmt.note)
+    frames = int(round(float(spec["duration"]) * fps)) * shutter
+    # Declared hold windows are free: the renderer re-uses one frame for them, so they are not
+    # render cost. v1 knew this and v2 shipped without it, which over-estimated long takes.
+    held = sum(max(0.0, float(b) - float(a))
+               for seg in render.pending(spec) for a, b in (seg.get("hold") or []))
+    held_frames = int(round(held * fps))
+    render_frames = max(0, frames - held_frames)
+    slices = render.resolve_slices(spec, getattr(args, "slices", None))
+    slices_explicit = bool(getattr(args, "slices", None)
+                          or (spec.get("render") or {}).get("slices"))
+    jobs = render.safe_jobs(
+        w, h,
+        int(getattr(args, "jobs", None) or (spec.get("render") or {}).get("jobs", 2)),
+        log=fmt.note)
     per = render.frame_cost_ms(spec, w, h)
     gb = render.free_gb()
     cached = 0
     for seg in render.pending(spec):
-        key = seg and Path(str(render.segment_path(spec, seg["id"]))).with_suffix(".key")
+        key = Path(str(render.segment_path(spec, seg["id"]))).with_suffix(".key")
         if key.is_file():
             cached += 1
-    wall = frames * per / 1000 / max(1, min(jobs, slices))
+    wall = render_frames * per / 1000 / max(1, min(jobs, slices))
     advice = []
     if per > 60 and render.png_kind(spec) == "png":
-        advice.append("use the default fast PNG (drop --png-compression default): -75% per frame")
-    if slices <= 1 and shutter == 1 and specmod.planned_duration(spec) > 3:
-        advice.append(f"add --slices {min(8, max(2, jobs * 2))} --jobs {jobs}: "
-                      f"a single take renders in one process otherwise")
+        advice.append("the slow PNG encoder is on: set render.png-compression to fast "
+                      "(or remove the explicit `default`) for roughly -75% per frame")
     if shutter > 1:
         advice.append(f"shutter x{shutter}: {frames} frames to render, slices forced to 1")
     if gb is not None and gb < 4 and jobs > 2:
-        advice.append(f"shutter x{shutter}: {frames} frames to render, slices forced to 1")
         advice.append(f"only {gb:.1f} GB free: keep --jobs <= 2, x264 buffers ~12 MB/frame at 4K")
-    out = {"ok": not [i for i in issues if i["level"] == "error"], "which": "plan",
-           "frames": frames, "size": [w, h], "png_kind": render.png_kind(spec),
-           "shutter_samples": shutter,
+    if not slices_explicit:
+        advice.append("one process, one take (slicing is opt-in: --slices N only when asked for)")
+
+    srep = style.report(spec)
+    crep = choreography.report(spec)
+    advisories = []
+    if srep.get("verdict") == "too repetitive":
+        advisories.append(
+            f"style: {srep.get('distinct_layouts')} distinct layout(s) for "
+            f"{srep.get('segments')} beat(s), {srep.get('adjacent_layout_repeats')} adjacent repeat(s)")
+    if crep.get("verdict") == "too_still":
+        advisories.append(
+            f"choreography: worst gap {crep.get('worst_gap')}s between state changes")
+    errors = [i for i in issues if i["level"] == "error"]
+    out = {"ok": not errors, "which": "plan",
+           "duration": specmod.planned_duration(spec),
+           "frames": render_frames, "frames_total": frames, "hold_frames": held_frames,
+           "size": [w, h], "png_kind": render.png_kind(spec), "shutter_samples": shutter,
            "finish": finish.describe(finish.resolve(spec.get("look") or {},
                                       pixelate=bool((spec.get("look") or {}).get("pixelate")))),
            "audio_tracks": len((spec.get("audio") or {}).get("tracks") or []),
            "audio_cues": len((spec.get("audio") or {}).get("cues") or []),
            "master": (spec.get("audio") or {}).get("master"),
-           "ms_per_frame": round(per), "slices": slices, "jobs": jobs, "free_gb": gb,
+           "ms_per_frame": round(per), "slices": slices, "slices_explicit": slices_explicit,
+           "jobs": jobs, "free_gb": gb,
            "est_wall_min": round(wall / 60, 1), "cached_segments": cached,
-           "issues": issues, "advice": advice}
-    fmt.emit(out, human=f"plan: {frames} frames @ {w}x{h} ({render.png_kind(spec)}, "
-                        f"{round(per)} ms/frame) -> ~{out['est_wall_min']} min "
-                        f"with {jobs} job(s) x {slices} slice(s)"
-                        + (f"; {len(advice)} suggestion(s)" if advice else ""))
-    if advice and not fmt.is_json():
-        for a in advice:
+           "style": srep, "choreography": crep,
+           "issues": issues, "advisories": advisories, "advice": advice}
+    fmt.emit(out, human=f"plan: {render_frames} frames to render"
+                  + (f" (+{held_frames} held)" if held_frames else "")
+                  + f" @ {w}x{h} ({render.png_kind(spec)}, {round(per)} ms/frame) -> ~"
+                  + f"{out['est_wall_min']} min with {jobs} job(s)"
+                  + (f" x {slices} slice(s)" if slices > 1 else "")
+                  + (f"; {len(advisories) + len(advice)} note(s)"
+                     if (advisories or advice) else ""))
+    if not fmt.is_json():
+        for a in advisories + advice:
             print("  -> " + a)
     return 0 if out["ok"] else 2
 
@@ -903,17 +893,21 @@ def _inject_common(parser):
         if name not in choices:
             continue
         sp = choices[name]
-        for flag, fkw in (("--slices", dict(type=int, default=1,
-                                            help="split ONE take into N parallel time slices (same single export)")),
-                          ("--jobs", dict(type=int, default=0, help="parallel workers")),
+        for flag, fkw in (("--slices", dict(type=int, default=None,
+                                            help="OPT-IN: split ONE take into N parallel time slices. "
+                                                 "Default is 1 (one process) however long the take is; "
+                                                 "pass this only when it was explicitly asked for")),
+                          ("--jobs", dict(type=int, default=None,
+                                          help="parallel workers (default: render.jobs, else 2)")),
                           ("--preset", dict(default=None,
-                                            help="x264 preset for intermediates (default ultrafast)")),
+                                            help="x264 preset for intermediate clips (default ultrafast)")),
                           ("--jpeg", dict(type=int, default=None,
                                           help="lossy intermediate frames, preflight only")),
-                          ("--reboot", dict(type=int, default=0,
+                          ("--reboot", dict(type=int, default=None,
                                             help="restart the browser every N frames")),
                           ("--incremental", dict(action="store_true",
-                                                  help="re-render only the frames whose state changed")),
+                                                  help="re-render only the frames whose state changed "
+                                                       "(state signature + every non-scene input)")),
                           ("--no-gpu", dict(dest="no_gpu", action="store_true",
                                             help="do not ask Chromium for GPU rasterisation"))):
             if not any(flag in a.option_strings for a in sp._actions):
