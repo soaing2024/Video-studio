@@ -51,7 +51,8 @@ def draft(spec: dict, ffmpeg: str, node: str, *, at: str | None = None, scale: f
     out = out_dir / f"draft-{seg['id']}-{a:g}-{b:g}.mp4"
 
     payload = render.prepare_assets(spec, seg, log=log)
-    payload["offset"] = a
+    # The window start is a CHANNEL fact: it goes to the renderer, which shifts window.seek.
+    # A draft is addressed by absolute take time, so the scene never sees it (see API.md §契约).
     data_file = out.with_suffix(".data.json")
     data_file.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
@@ -66,7 +67,7 @@ def draft(spec: dict, ffmpeg: str, node: str, *, at: str | None = None, scale: f
            "--scene", str(render.scene_path(seg)), "--out", str(out), "--data", str(data_file),
            "--fps", str(int(fps)), "--duration", f"{duration:.3f}",
            "--width", str(w), "--height", str(h), "--ffmpeg", ffmpeg,
-           "--crf", "30", "--preset", "ultrafast"]
+           "--crf", "30", "--preset", "ultrafast", "--offset", f"{a:.3f}"]
     if scaled:
         cmd += ["--scale", f"{float(scale):.4f}", "--png-compression", "fast"]
     else:
@@ -162,12 +163,14 @@ def scrub_html(spec: dict, out: str | Path | None = None, log=print) -> dict:
     so what you scrub is what the renderer sees - including `Phys` bakes."""
     seg = render.pending(spec)[0]
     payload = render.prepare_assets(spec, seg, log=log)
-    payload["offset"] = 0.0
+    # The transport drives absolute take time, so the shim adds 0; it is installed anyway so
+    # that every entry point runs the scene through exactly the same channel.
     payload["fps"] = spec["video"]["fps"]
     payload["duration"] = float(seg["duration"])
     scene = render.scene_path(seg).read_text(encoding="utf-8")
     rt = runtime.SKILL_DIR / "assets" / "runtime"
-    injected = [f'<script src="{render._file_url(rt / n)}"></script>' for n in render.RUNTIME_FILES]
+    injected = ['<script>window.__TAKE_OFFSET = 0;</script>']
+    injected += [f'<script src="{render._file_url(rt / n)}"></script>' for n in render.RUNTIME_FILES]
     injected += [f'<script src="{render._file_url(p)}"></script>' for p in render.libs_for(spec, seg)]
     injected.append("<script>window.SCENE = " + json.dumps(payload, ensure_ascii=False) + ";</script>")
     block = "\n".join(injected)

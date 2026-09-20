@@ -67,14 +67,22 @@ render time is spent.
 
 1. `probe` the source assets: size, alpha coverage, dominant colours, duration, loudness.
 2. Write a project spec (JSON; `//` comments allowed).
-3. Write the seven-line motion spec and declare the handoffs in `data.beats`, then audit them:
+3. Search the structure before writing the shot: three candidates that differ in macrostructure
+   or generative operator, each taken only to pass 1 (blocking) and rehearsed as a 4 s draft,
+   compared with `python scripts/design_audit.py draft.mp4 --times 1,2.2,3.4 --ascii` before one
+   is chosen. This is the step that catches a film whose every gate is green and which still
+   reads badly ([references/motion-design.md](references/motion-design.md)).
+4. Write the seven-line motion spec and declare the handoffs in `data.beats`, then audit them:
    `python scripts/beat_audit.py project.json` fails on exit-then-enter gaps, over-long moves and
    weak overlaps - the three causes of a slide-deck feel
    ([references/rhythm-handoff.md](references/rhythm-handoff.md)).
-4. `check` the whole timeline. `preview` only when a specific doubt cannot be settled on paper:
-   one targeted frame that answers it, never a per-beat sweep. The default is to judge the still
-   frame from the plan.
-5. `plan` for the frame budget, then `run`: render straight into cached clips, assemble with
+5. `check` the whole timeline, and audit weight and rhythm on the rehearsal draft:
+   `python scripts/design_audit.py <rehearsal>.mp4 --project project.json --ascii` reports whether
+   any beat is dense or dark enough to give the others weight, whether the rhythm has accents,
+   and whether anything is held still long enough to read.
+   Then `preview` only when a specific doubt cannot be settled on paper: one targeted frame that
+   answers it, never a per-beat sweep. The default is to judge the still frame from the plan.
+6. `plan` for the frame budget, then `run`: render straight into cached clips, assemble with
    ffmpeg, verify by measurement. Frames are piped into ffmpeg's stdin; no PNG sequence ever
    hits disk.
 
@@ -244,6 +252,14 @@ pass, and the list of skeletons that are already used up:
   Declare genuinely static stretches as `hold` windows - the renderer reuses one frame for them, and
   that is the only cost lever a single take has left.
 - **Compose the shot, do not fill a template.** Every shot is authored for this video: pick the
+- **Contrast is what the gates cannot see.** A take where every beat carries the same weight reads
+  as bland however clean its measurements are. It needs at least one beat that is dense (>=12%
+  ink) or dark (>=3% below luma 110), a rhythm with accents rather than a flat line, and
+  something held still long enough to be read. `python scripts/design_audit.py <draft>.mp4
+  --project project.json --ascii` measures those four things and prints the ink layout of every
+  beat, so a still frame can be read without looking at an image. Run it on the rehearsal; when
+  it fails, change the structure, not the easing
+  ([references/motion-design.md](references/motion-design.md)).
   structure first, invent the mechanic from the subject's own physics, then write the scene. The
   old skeletons are deleted, not merely discouraged: a video assembled from a fixed set of them
   is the same video for every brief, and the second one wearing a used skeleton reads as
@@ -325,6 +341,10 @@ pass, and the list of skeletons that are already used up:
   [references/choreography.md](references/choreography.md). Written in Chinese.
 - Aesthetic gates - proportion, type-scale jump, colour budget, ink ratio, reference traditions
   and the AI-slop blacklist: [references/taste.md](references/taste.md). Written in Chinese.
+- Why a take that passes every gate can still read badly - missing contrast in weight, rhythm and
+  density, readable pauses, the three-candidate structure search, and the ASCII frame reader that
+  lets an agent judge composition without seeing an image:
+  [references/motion-design.md](references/motion-design.md). Written in Chinese.
 - The slide-deck failure - two-ended easing, exit-then-enter gaps, whole-frame replacement, and
   the numbers that fix each: [references/rhythm-handoff.md](references/rhythm-handoff.md). Written in Chinese.
 - Motion realism - the seven-line motion spec, twelve hooks, per-feeling parameter sets:
@@ -332,6 +352,10 @@ pass, and the list of skeletons that are already used up:
 - Fast lane and self-checks - `scripts/scaffold.py` builds a project from `assets/starter/`;
   `scripts/qc_video.py` measures region ink and prints ASCII frame maps; `scripts/taste_check.py`
   reports rhythm and composition; `scripts/beat_audit.py` audits the handoff timeline.
+- Design audit - `scripts/design_audit.py <video> --project project.json --ascii` measures weight
+  variety, rhythm accents, readable pauses and cross-beat layout repeats in one pass; it exits
+  non-zero on any of them. Its thresholds are calibrated against a real delivery and are documented
+  in [references/motion-design.md](references/motion-design.md) §1.1.
 
 ## Tooling beyond the core
 

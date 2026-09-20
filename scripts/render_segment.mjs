@@ -58,6 +58,10 @@ const gpu = String(a.gpu === undefined ? "true" : a.gpu) !== "false";
 // Draft mode: the CSS layout stays at `width x height` (so composition is honest) while the
 // captured image is scaled down. Only CDP can do that; Playwright's own screenshot cannot.
 const scale = Number(a.scale || 1);
+// This worker's window start, in absolute take time. It is a CHANNEL property: the page gets
+// it as window.__TAKE_OFFSET and assets/runtime/scene.js shifts window.seek by it, so a scene
+// always receives absolute time and never has to know that slicing exists (API.md §契约).
+const takeOffset = Number(a.offset || 0);
 
 const GPU_ARGS = ["--use-angle=d3d11", "--enable-gpu-rasterization", "--enable-zero-copy",
                   "--ignore-gpu-blocklist", "--enable-unsafe-swiftshader"];
@@ -76,6 +80,7 @@ async function boot() {
   page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text().slice(0, 200)); });
   await page.addInitScript((scene) => { window.SCENE = scene; }, data);
   await page.addInitScript((on) => { window.__SIG_CANVAS = on; }, a["sig-canvas"] !== "0");
+  await page.addInitScript((o) => { window.__TAKE_OFFSET = o; }, takeOffset);
   for (const rt of String(a.runtimes || "").split(",").filter(Boolean)) {
     await page.addInitScript({ path: rt });
   }
@@ -92,6 +97,19 @@ async function boot() {
          [...errors, ...consoleErrors].join("\n"));
   }
   await page.evaluate(() => document.fonts.ready);
+  // Belt and braces. scene.js has already wrapped window.seek, but a scene that redefined the
+  // property outright (Object.defineProperty) would slip past that setter. Re-assert the shift
+  // here; the marker stops it applying twice.
+  if (takeOffset){
+    await page.evaluate((off) => {
+      const cur = window.seek;
+      if (typeof cur !== "function" || cur.__offsetWrapped === off) return;
+      const raw = cur;
+      const fn = (t) => raw(Number(t) + off);
+      fn.__offsetWrapped = off;
+      window.seek = fn;
+    }, takeOffset);
+  }
   return { browser, page };
 }
 

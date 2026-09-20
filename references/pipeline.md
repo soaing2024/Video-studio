@@ -201,8 +201,24 @@ frame, shift+arrows jump a second. It writes `build/<name>/scrub.html` and rende
 `rehearse` renders a draft with `deviceScaleFactor = scale` at a reduced fps, and with
 `--scale` ≠ 1 it forces PNG (see the failure mode below). It writes to
 `build/<name>/rehearsal/`, never to `build/<name>/segments/`, so no cache key and no delivery
-clip is touched. `--at a:b` rehearses one window; the scene must treat the `t` it is given as
-absolute take time (the payload carries `offset`).
+clip is touched. `--at a:b` rehearses one window.
+
+**The take offset is a channel fact, not a scene fact.** Every entry point - a parallel slice, a
+still, a rehearsal window, the scrub page - hands the scene *absolute* take time on the same
+clock as `duration`. The renderer does that by passing `--offset` to `render_segment.mjs`, which
+sets `window.__TAKE_OFFSET` before the runtimes load; `assets/runtime/scene.js` wraps
+`window.seek` by it, and `render_segment.mjs` re-asserts the wrap after boot in case a scene
+redefined the property. `window.SCENE` never carries the offset, so a scene written without any
+knowledge of slicing is correct by construction and needs no offset handling at all.
+
+A scene written before this rule, one that reached into the payload for the legacy offset field
+and added it itself, keeps working unchanged: that field is no longer published, so the scene's
+own `+ 0` is a no-op on top of the channel's shift.
+
+The test that keeps it honest is `vs.py selftest`, which renders with `--slices 2` and requires
+the two halves to differ. Before this rule, every slice rendered window one and the joined take
+was that window repeated N times - `verify` could not see it, because its samples all landed
+inside the repeated content and differed from each other anyway.
 
 Measured on the selftest scene: a 30 s 1080p take is ~14 s of wall clock as a draft and ~4
 minutes as a delivery render. That ratio is the whole point.

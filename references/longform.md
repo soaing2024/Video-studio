@@ -94,8 +94,10 @@ bottom band, and compare with a frame between cues.
 ## 6. Delivery checklist
 
 1. `verify` passes - duration, content, fades, motion, audio level.
-2. **No dead stretch**: the `motion` check reports frozen intervals against a budget; a long take
-   with no holds declared and nothing moving is the failure this catches.
+2. **No dead stretch**: the `motion` check gates on change-per-second and *reports* the frozen
+   interval next to the share of runtime the project declares static (it does not gate on that
+   number - a declared `hold` is a cost lever, not a defect). A long take with nothing moving and
+   nothing declared is the failure this catches.
 3. Spot-check a frame per internal chapter, not just the first frame.
 4. Chapter numbering runs 1..N with no gaps.
 5. Watch the joins *inside* the take: a recomposition that lands while the previous content is still

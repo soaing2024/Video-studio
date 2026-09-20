@@ -524,16 +524,19 @@ def render_sliced(spec: dict, seg: dict, ffmpeg: str, node: str, slices: int, jo
         if not force and part.is_file() and keyf.is_file() and keyf.read_text().strip() == key:
             return {"part": str(part), "cached": True, "index": i}
         d = dict(payload)
-        d["offset"] = start
+        # The take offset is a property of the CHANNEL, not of the scene. It travels to the
+        # renderer on --offset, which shifts window.seek itself; window.SCENE must never carry
+        # it. A scene therefore knows nothing about slicing and still gets absolute take time.
         data_file = part.with_suffix(".data.json")
         data_file.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+        take_offset = ["--offset", f"{start:.6f}"]
         local_holds = ",".join(f"{max(0.0, a - start):.3f}-{min(span, b - start):.3f}"
                                for a, b in holds if b > start and a < start + span)
         cmd = [node, str(runtime.SKILL_DIR / "scripts" / "render_segment.mjs"),
                "--scene", str(scene_path(seg)), "--out", str(part), "--data", str(data_file),
                "--fps", str(render_fps(spec)), "--duration", f"{span:.6f}",
                "--width", str(w), "--height", str(h), "--ffmpeg", ffmpeg,
-               "--crf", str((spec.get("render") or {}).get("crf", 12))]
+               "--crf", str((spec.get("render") or {}).get("crf", 12))] + take_offset
         if local_holds:
             cmd += ["--hold", local_holds]
         cmd += encode_args(spec, seg, w, h) + runtime_args(spec, seg)
@@ -552,13 +555,19 @@ def render_sliced(spec: dict, seg: dict, ffmpeg: str, node: str, slices: int, jo
                 "ms_per_frame": info.get("ms_per_frame")}
 
     want_all = slice_ranges(duration, fps, slices)
+    # Keep what each worker actually reported. Rebuilding this list from want_all with
+    # `cached: True` hardcoded made "N freshly rendered" print 0 on every run and threw away the
+    # per-slice ms/frame - the two numbers an agent uses to decide whether the cache worked and
+    # what a re-render will cost.
+    done = {}
     if plan:
         with ThreadPoolExecutor(max_workers=max(1, min(jobs, len(plan)))) as pool:
-            list(pool.map(one, plan))
+            for r in pool.map(one, plan):
+                done[r["index"]] = r
     results = []
     for i, start, span in want_all:
         part = parts / f"{seg['id']}.{i:03d}.mp4"
-        results.append({"part": str(part), "index": i, "cached": True})
+        results.append(done.get(i) or {"part": str(part), "index": i, "cached": True})
 
     lst = parts / f"{seg['id']}.txt"
     lines = ["file '" + Path(r["part"]).as_posix() + "'\n" for r in results]
@@ -595,6 +604,14 @@ def _slice_key(spec: dict, seg: dict, payload: dict, i: int, start: float, span:
             hsh.update(f"{name}:{st.st_size}:{int(st.st_mtime)}".encode())
     hsh.update(f"{w}x{h}@{spec['video']['fps']}:{span:.6f}:{i}".encode())
     hsh.update(json.dumps(encode_args(spec, seg, w, h)).encode())
+    # The injected runtimes decide the picture just as much as the scene does - the take-offset
+    # shim lives in scene.js. Without them in the key, editing a runtime reuses stale slices and
+    # the delivered take silently mixes two versions of the pipeline.
+    for name in RUNTIME_FILES:
+        rt = runtime.SKILL_DIR / "assets" / "runtime" / name
+        if rt.is_file():
+            st = rt.stat()
+            hsh.update(f"rt:{name}:{st.st_size}:{int(st.st_mtime)}".encode())
     hsh.update(libs.fingerprint(list(spec.get("libs") or []) + list(seg.get("libs") or [])).encode())
     return hsh.hexdigest()[:16]
 
@@ -614,14 +631,15 @@ def probe_frames(spec: dict, seg: dict, ffmpeg: str, node: str, times: list[floa
         png = out_dir / f"t{t:07.3f}.png"
         pj = out_dir / f"t{t:07.3f}.probe.json"
         d = dict(payload)
-        d["offset"] = t
+        # Stills are addressed by ABSOLUTE take time, exactly like a slice's frames are once the
+        # channel has shifted them. No offset on this path at all.
         data_file = out_dir / f"t{t:07.3f}.data.json"
         data_file.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
         cmd = [node, str(runtime.SKILL_DIR / "scripts" / "render_segment.mjs"),
                "--scene", str(scene_path(seg)), "--out", str(out_dir / f"t{t:07.3f}.mp4"),
                "--data", str(data_file), "--fps", str(spec["video"]["fps"]), "--duration", "0.05",
                "--width", str(w), "--height", str(h), "--ffmpeg", ffmpeg,
-               "--still", "0", "--still-out", str(png), "--probe", str(pj)]
+               "--still", f"{t:.3f}", "--still-out", str(png), "--probe", str(pj)]
         cmd += encode_args(spec, seg, w, h) + runtime_args(spec, seg)
         proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
                               errors="replace", env=runtime_env())

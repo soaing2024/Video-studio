@@ -115,11 +115,23 @@
       if (c.html) d.innerHTML = c.html;
       if (c.text) d.textContent = c.text;
       const box = c.box || [10, 10];
+      // Origin 0 0, not the CSS default: frame() places every object with a trailing
+      // translate(-50%,-50%), and with the origin at the centre that offset is applied inside
+      // the scale, displacing anything at depth by (S-1)*size/2 - 1057 px for a 520 px box at
+      // 5x. Probe-measured against a three.js camera at the same world point: 1.4 px error
+      // with origin 0 0, versus the object's own half-width with the default.
       Object.assign(d.style, { position: "absolute", left: "0", top: "0",
-        width: box[0] + "px", height: box[1] + "px", transformOrigin: "50% 50%" }, c.style || {});
+        width: box[0] + "px", height: box[1] + "px", transformOrigin: "0 0" }, c.style || {});
       (c.parent || world).appendChild(d);
-      const obj = { el: d, name: name || d.className, x: c.pos ? c.pos[0] : 0,
-        y: c.pos ? c.pos[1] : 0, z: c.z || 0, zc: c.depth, sx: 1, sy: 1, rot: 0, op: 1,
+      // x / y / rot / sx / sy are honoured here, not only through move(): passing them in the
+      // config used to be silently ignored, so a track written inline never ran. pos stays as
+      // the shorthand for "constant x and y".
+      const obj = { el: d, name: name || d.className,
+        x: c.x !== undefined ? c.x : (c.pos ? c.pos[0] : 0),
+        y: c.y !== undefined ? c.y : (c.pos ? c.pos[1] : 0),
+        z: c.z || 0, zc: c.depth,
+        sx: c.sx !== undefined ? c.sx : 1, sy: c.sy !== undefined ? c.sy : 1,
+        rot: c.rot !== undefined ? c.rot : 0, op: 1,
         blur: 0, keep: c.keep, mst: c.mst, parent: c.parent, off: c.off };
       d.__o = obj;                    // motion verbs take the node and find its track
       OBJ.push(obj);
@@ -243,7 +255,11 @@
     /* stations: [t, x, y, z, zoom, rot, ease] - the camera arrives at each one and never
      * stops; handheld drift and impact shake are added on top. */
     function cam(stations, cfg) {
-      camPath = stations;
+      // Normalise every station to seven slots. A row that stops at five (the shipped 30 s
+      // example does) leaves `rot` undefined, and undefined plus a drift term is NaN - which
+      // propagates into every transform in the frame. Silently. Fill the gaps instead.
+      camPath = (stations || []).map((s) => [s[0], s[1], s[2], s[3],
+        s[4] === undefined ? 1 : s[4], s[5] === undefined ? 0 : s[5], s[6] || "s2"]);
       const c = cfg || {};
       camHits = c.hits || camHits;
       if (c.shake !== undefined) shakeAmp = c.shake;
@@ -477,7 +493,11 @@
 
     /* expose */
     Object.assign(api, { fx: fxapi, frame, requestAnimationFrame: undefined });
-    global.seek = function (t) { frame(Math.max(0, Math.min(o.duration || 30, (global.SCENE.offset || 0) + t))); };
+    /* window.seek receives ABSOLUTE take time - the channel (assets/runtime/scene.js) already
+     * shifted it by this worker's slice offset, so adding anything here would double-count it on
+     * a parallel render. Clamp against the TAKE's own length when the payload carries one. */
+    const TLEN = (global.SCENE && global.SCENE.duration) || o.duration || 30;
+    global.seek = function (t) { frame(Math.max(0, Math.min(TLEN, Number(t)))); };
     global.__sceneReady = true;
     return api;
   }

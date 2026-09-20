@@ -375,10 +375,17 @@ def build_graph(spec: dict, master: dict | None = None,
                       f":offset={measured['target_offset']}")
             # linear mode can still leave inter-sample peaks: the limiter is the guarantee
             # Limiter sits 0.4 dB below the ceiling: AAC adds inter-sample overshoot after the
-            # filter ran, and the delivered file is what `verify` measures. Measured here: a
-            # -1.0 dBTP limiter left the encoded file at -0.35 dBTP.
+            # filter ran, and the delivered file is what `verify` measures.
+            #
+            # `level=false` is load-bearing. alimiter's auto-level defaults to ON, and when it is
+            # left on it re-normalises the output peak to full scale - which both overshoots the
+            # loudness target and pushes the true peak back to 0 dBFS, exactly what the limiter
+            # was there to prevent. Measured on a real 30 s delivery: -12.33 LUFS / -0.76 dBTP
+            # against a -14 / -1.0 target, i.e. 1.7 LU too loud and 0.24 dB over the ceiling.
+            # With level=false the same premix and the same measured_* values come out at
+            # -13.49 LUFS / -1.28 dBTP: inside the +-1.5 LU gate and under the ceiling.
             lim = min(0.99, 10 ** ((tp - 0.4) / 20))
-            chain += f",alimiter=level_in=1:level_out=1:limit={lim:.4f}"
+            chain += f",alimiter=level_in=1:level_out=1:level=false:limit={lim:.4f}"
         else:
             loud = audio_cfg.get("loudnorm")
             if loud:

@@ -4,7 +4,7 @@
 
 ## 契约
 
-- **场景**：an .html file exposing window.seek(t) as a pure function of t, then window.__sceneReady = true
+- **场景**：an .html file exposing window.seek(t) as a pure function of t, then window.__sceneReady = true. t is ABSOLUTE take time on the same clock as the project's duration (0 -> duration), whatever the renderer does behind it. How a take is cut into parallel slices is the renderer's business: a scene neither sees it nor may it care. The same scene must produce the same frames at --slices 1 and --slices 16.
 - **项目**：project.json: {name, video{width,height,fps,crf,preset}, duration, scene, libs[], data{}, audio{tracks[]}}
 - **一次生成**：the deliverable is rendered once; slicing `--slices N` splits ONE export across processes, it is not a second render
 
@@ -118,7 +118,7 @@ vs.py sfx --get 12345 --out assets/sfx --name whoosh-01
 - `Scene`: ``
 - `Anim`: ``
 - `Kit`: ``
-- `flags`: `crf`, `data`, `debug`, `duration`, `ffmpeg`, `fps`, `gpu`, `height`, `hold`, `jpeg`, `out`, `preset`, `probe`, `progress`, `ready_timeout`, `reboot`, `runtimes`, `scale`, `scene`, `sig`, `still`, `url`, `width`
+- `flags`: `crf`, `data`, `debug`, `duration`, `ffmpeg`, `fps`, `gpu`, `height`, `hold`, `jpeg`, `offset`, `out`, `preset`, `probe`, `progress`, `ready_timeout`, `reboot`, `runtimes`, `scale`, `scene`, `sig`, `still`, `url`, `width`
 
 ## 命令一览
 

@@ -34,10 +34,15 @@ python vs.py init 我的项目 --duration 20
 python vs.py check 我的项目\project.json
 python vs.py plan  我的项目\project.json --slices 6 --jobs 3
 
-# 4.（可选，非必要不做）纸面判断不了的疑问才渲一帧
+# 4. 设计审计：在 35% 草稿上量四个判据（重量对比 / 节奏峰值 / 可读停顿 / 拍间布局重复）
+#    任何一项不过就改结构，不是改缓动；--ascii 逐拍打出墨迹图，看不到图的 agent 靠它读构图
+python vs.py rehearse 我的项目\project.json
+python scripts\design_audit.py 草稿.mp4 --project 我的项目\project.json --ascii
+
+# 5.（可选，非必要不做）纸面判断不了的疑问才渲一帧
 python vs.py preview 我的项目\project.json --at 2.5
 
-# 5. 出片：渲染 + 剪辑 + 验收（一次成片）
+# 6. 出片：渲染 + 剪辑 + 验收（一次成片）
 python vs.py run 我的项目\project.json --slices 6 --jobs 3
 ```
 

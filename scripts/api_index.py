@@ -154,7 +154,12 @@ def main() -> int:
         "skill": "video-studio",
         "entrypoint": "python scripts/vs.py <command> [options]",
         "contract": {
-            "scene": "an .html file exposing window.seek(t) as a pure function of t, then window.__sceneReady = true",
+            "scene": ("an .html file exposing window.seek(t) as a pure function of t, then "
+                      "window.__sceneReady = true. t is ABSOLUTE take time on the same clock as "
+                      "the project's duration (0 -> duration), whatever the renderer does behind "
+                      "it. How a take is cut into parallel slices is the renderer's business: a "
+                      "scene neither sees it nor may it care. The same scene must produce the "
+                      "same frames at --slices 1 and --slices 16."),
             "project": "project.json: {name, video{width,height,fps,crf,preset}, duration, scene, libs[], data{}, audio{tracks[]}}",
             "one_write_one_render": "the deliverable is rendered once; slicing `--slices N` splits ONE export across processes, it is not a second render",
         },

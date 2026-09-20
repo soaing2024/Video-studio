@@ -133,5 +133,30 @@
     global.__sceneReady = true;
   }
 
+  /* ---- the take offset belongs to the channel, not to the scene -------------------------
+   * A parallel render cuts the take into N windows. The renderer puts this window's start in
+   * window.__TAKE_OFFSET before this file loads, and the wrapper below shifts window.seek by
+   * it. A scene therefore always receives ABSOLUTE take time: it never has to know that the
+   * take was sliced, and asking for t = 0 gives the first frame OF THIS WINDOW. Leaving the
+   * shift to the scene is the bug this replaces - see API.md "契约". */
+  function installTakeOffset() {
+    var off = Number(global.__TAKE_OFFSET || 0);
+    if (!off) return;
+    var raw = null;
+    try {
+      Object.defineProperty(global, "seek", {
+        configurable: true,
+        get: function () { return raw; },
+        set: function (fn) {
+          if (typeof fn !== "function" || fn.__offsetWrapped === off) { raw = fn; return; }
+          var wrapped = function (t) { return fn(Number(t) + off); };
+          wrapped.__offsetWrapped = off;
+          raw = wrapped;
+        }
+      });
+    } catch (e) { /* a host without a configurable window.seek just runs unwrapped */ }
+  }
+  installTakeOffset();
+
   global.Scene = { mount, type, safe, ready, SAFE, icon, iconNames };
 })(window);

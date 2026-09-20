@@ -69,10 +69,15 @@ python vs.py init 我的项目 --duration 20
 # 2. 每一拍先出三个结构候选，各自只做骨架，横向比一次再选
 python vs.py shots "这一拍要让观众明白什么" --brief brief.json --beat 2
 
-# 3.（可选，非必要不做）只有纸面上判断不了的疑问，才渲一帧回答它
+# 3. 设计审计：在 35% 草稿上量四个判据（重量对比 / 节奏峰值 / 可读停顿 / 拍间布局重复）
+#    任何一项不过，改结构，不是改缓动。--ascii 让看不到图的 agent 也能读构图
+python vs.py rehearse 我的项目\project.json
+python scripts\design_audit.py 草稿.mp4 --project 我的项目\project.json --ascii
+
+# 4.（可选，非必要不做）只有纸面上判断不了的疑问，才渲一帧回答它
 python vs.py preview 我的项目\project.json --segment title --at 2.5
 
-# 4. 出片：渲染 + 剪辑 + 验收
+# 5. 出片：渲染 + 剪辑 + 验收
 python vs.py run 我的项目\project.json --jobs 3
 ```
 
@@ -433,7 +438,7 @@ hold 里的帧是复用的，所以那几秒在成片里照样存在，但只花
 
 ## 快手线与自检工具
 
-`scripts/` 下与 `vs.py` 并列的四个工具：
+`scripts/` 下与 `vs.py` 并列的五个工具：
 
 | 工具 | 用途 |
 | --- | --- |
@@ -441,15 +446,17 @@ hold 里的帧是复用的，所以那几秒在成片里照样存在，但只花
 | `qc_video.py` | 批量抽帧 + 分区墨量 + ASCII 出图：在没有图像输入的环境里也能“看”画面，并抓出“渲染成功但内容是空的” |
 | `taste_check.py` | `--rhythm` 给节奏指标与柱状图（冻结帧比例、最长死拍、每秒变化、p90/均值）；`--stills` 给构图指标（留白、重心偏离、对称度、墨团、安全区） |
 | `beat_audit.py` | 审 `data.beats` 的交接：GAP / 弱交接 / 动作过长 / 内部空档，并打出时间轴图 |
+| `design_audit.py` | 审“闸门全绿但仍然难看”：重量对比 / 节奏峰值 / 可读停顿 / 拍间布局重复；`--ascii` 逐拍打出墨迹布局 |
 
 ```bash
 python scripts/scaffold.py ./my-video --name my-video --duration 10
 python scripts/beat_audit.py my-video/project.json      # 渲染前：交接不过就别渲
 python scripts/qc_video.py --project my-video --times 2,4,6
+python scripts/design_audit.py draft.mp4 --project my-video/project.json --ascii   # 草稿阶段：设计审计，不过就别渲
 python scripts/taste_check.py my-video/my-video.mp4     # 渲染后：节奏 + 构图
 ```
 
-三份配套文档：`references/taste.md`（审美闸门与 AI 味黑名单）、`references/rhythm-handoff.md`（“PPT 感”的三个根因与解法）、`references/motion-realism.md`（7 行运动设定、12 条真实感钩子、情绪→参数）。
+四份配套文档：`references/taste.md`（审美闸门与 AI 味黑名单）、`references/rhythm-handoff.md`（“PPT 感”的三个根因与解法）、`references/motion-realism.md`（7 行运动设定、12 条真实感钩子、情绪→参数）、`references/motion-design.md`（闸门全绿之后为什么还是难看：四个判据、三候选结构搜索、快闪的真实定义）。
 
 ## 高级技法提示词库
 
@@ -557,6 +564,7 @@ video-studio/
 │  ├─ qc_video.py           抽帧 / 分区墨量 / ASCII 出图
 │  ├─ taste_check.py        节奏（--rhythm）与构图（--stills）测量
 │  ├─ beat_audit.py         交接审计 + 时间轴图
+│  ├─ design_audit.py       设计审计：重量 / 节奏峰值 / 停顿 / 布局重复 + ASCII 读图
 │  └─ lib/                  运行时探测、渲染编排、库注入（libs.py）、剪辑装配、验收、TTS、混剪等
 └─ vendor/                  ffmpeg（`doctor --install-ffmpeg` 按需落盘，GPL 构建；.gitignore 已忽略）
 ```

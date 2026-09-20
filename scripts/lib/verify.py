@@ -155,28 +155,29 @@ class Verifier:
             p90_motion = ordered_m[int(len(ordered_m) * 0.9)]
             micro = (sum(per_frame) / len(per_frame)) if per_frame else 0.0
             frozen = (sum(1 for d in per_frame if d < 1.0) / len(per_frame)) if per_frame else 0.0
-            # Held shots are a deliberate cost choice, not a defect, so the budget grows with the
-            # share of runtime the project declares static. Unintended stillness still fails.
+            # Held shots are a deliberate cost choice, not a defect. The declared static share is
+            # therefore REPORTED next to the frozen-frame figure, not turned into a ceiling.
             total_len = specmod.planned_duration(spec) or 1.0
             still_len = 0.0
             seg_map = specmod.segment_map(spec)
             for seg in spec.get("segments", []):
-                # A single take declares its still stretches as `hold` windows. That is the same
-                # deliberate stillness a `still: true` segment used to be, so it earns the same
-                # credit against the frozen-frame budget.
+                # A single take declares its still stretches as `hold` windows; a multi-shot project
+                # declares them as `still: true` segments. Same idea, both counted here.
                 still_len += sum(max(0.0, float(b) - float(a)) for a, b in (seg.get("hold") or []))
             for item in spec.get("timeline", []):
                 seg = seg_map.get(item.get("segment"))
                 if seg and (seg.get("data") or {}).get("still"):
                     still_len += specmod.item_length(spec, item)
-            budget = min(0.7, 0.32 + 0.75 * (still_len / total_len))
-            # Gate on what changed over a second: that is what an eye reads as "moving". The
-            # per-frame figure is reported for diagnosis but not gated - it under-reads sparse
-            # compositions (thin type, a few bars) that are genuinely animating.
+            # The GATE is per-second motion: that is what an eye reads as "moving". The per-frame
+            # and frozen-interval figures are REPORTED, not gated to a ceiling - the per-frame one
+            # under-reads sparse compositions (thin type, a few bars) that are genuinely
+            # animating, and a frozen interval is a declared `hold`, which is a cost lever rather
+            # than a defect. The message below said "budget" for a number that was never
+            # compared to anything, which read as a gate that had been passed.
             self.add("motion", mean_motion >= 2.2,
                      f"change per second {mean_motion:.2f}/255 (need 2.2), p90 {p90_motion:.2f}, "
                      f"per frame {micro:.2f}, frozen intervals {frozen * 100:.0f}% "
-                     f"(budget {budget * 100:.0f}%: {still_len:.1f}s of {total_len:.1f}s static)")
+                     f"(reported, not gated; {still_len:.1f}s of {total_len:.1f}s declared static)")
 
         audio_cfg = spec.get("audio") or {}
         tracks = audio_cfg.get("tracks", [])

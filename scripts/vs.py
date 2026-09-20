@@ -536,13 +536,16 @@ def cmd_plan(args) -> int:
 SELFTEST_PROJECT = {
     "name": "selftest",
     "video": {"width": 640, "height": 360, "fps": 24, "crf": 24, "preset": "veryfast"},
-    "render": {"jobs": 2, "crf": 16},
+    # slices=2 on purpose: the smoke test has to exercise the parallel-slice channel, because
+    # that is where a take silently becomes "window one, repeated N times" if the offset is not
+    # applied. The duration is 4.0s so that 4.0*24/2 divides exactly and the join is lossless.
+    "render": {"jobs": 2, "crf": 16, "slices": 2},
     "look": {"accent": "#e0455f", "pixelate": {"scale": 2, "colors": 16},
              "fade_in": 0.3, "fade_out": 0.6, "progress_bar": {"height": 2}},
     # One take: a single scene for the whole runtime, with a held stretch in the middle. That hold
     # exercises the only cost lever a single take still has - the renderer reuses one frame instead
     # of screenshotting 1.4s of identical picture.
-    "duration": 3.6,
+    "duration": 4.0,
     "scene": "scenes/take.html",
     "hold": [[2.0, 3.2]],
     "data": {"title": "render ok", "caption": "one take, no cuts"},
@@ -569,7 +572,34 @@ def cmd_selftest(args) -> int:
         project = tmp / "project.json"
         project.write_text(json.dumps(spec_dict, indent=2), encoding="utf-8")
         spec = specmod.load(str(project))
-        render.render_all(spec, ffmpeg, node, jobs=int(args.jobs or 2), force=True, log=note)
+        took = render.render_all(spec, ffmpeg, node, jobs=int(args.jobs or 2), force=True, log=note)
+        # Regression guard for the parallel-slice channel. Each slice gets its own window of the
+        # take, and the renderer must hand the scene that window's start; before the channel owned
+        # the offset, every slice rendered window one, so the joined take was the opening repeated
+        # N times. `verify` cannot see that: its samples all land inside the repeated content and
+        # differ from each other anyway. So compare the FIRST frame of the slices directly.
+        import numpy as np
+        from PIL import Image
+        parts = sorted((render.build_dir(spec) / "slices").glob(f"{took[0]['segment']}.*.mp4"))
+        if took[0].get("slices", 1) > 1 and len(parts) > 1:
+            shots = []
+            for p in parts[:2]:
+                png = tmp / (p.stem + ".png")
+                subprocess.run([ffmpeg, "-y", "-v", "error", "-i", str(p), "-frames:v", "1",
+                                str(png)], check=True)
+                shots.append(np.asarray(Image.open(png).convert("L"), dtype=np.int16))
+            delta = float(np.abs(shots[0] - shots[1]).mean()) if len(shots) == 2 else 0.0
+            if len(shots) < 2 or delta <= 1.0:
+                emit({"ok": False, "which": "selftest", "problem": "slice_offset_not_honoured",
+                      "detail": (f"the take renders in {took[0].get('slices')} slices and "
+                                 f"{len(shots)} of them start on the same picture "
+                                 f"(mean |diff| {delta:.2f}) - the offset is not reaching the scene"),
+                      "fix_hint": ("window.seek must receive absolute take time: the renderer "
+                                   "passes --offset to render_segment.mjs, which sets "
+                                   "window.__TAKE_OFFSET before the runtimes load")})
+                return 1
+            note(f"  slice channel: {took[0]['slices']} slices, first frames differ "
+                 f"(mean |diff| {delta:.1f})")
         result = assemble.assemble(spec, ffmpeg, log=note)
         report = verify.verify(spec, ffmpeg, video=result["output"], samples=3)
         emit({"ok": report["ok"], "video": result["output"],
