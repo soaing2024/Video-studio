@@ -48,6 +48,8 @@ EXAMPLES = {
               "vs.py audio work/mine --check"],
     "card": ["vs.py card work/mine --title 'Star it.' --cn '去点亮 Star'"],
     "api": ["python scripts/api_index.py", "vs.py api preview"],
+    "shots": ['vs.py shots "这一拍要让观众明白什么"',
+              "vs.py shots --brief brief.json --beat 2 --json"],
     "sfx": ['vs.py sfx "whoosh transition" --top 8',
             "vs.py sfx --get 12345 --out assets/sfx --name whoosh-01"],
 }

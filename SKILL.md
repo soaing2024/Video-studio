@@ -90,6 +90,7 @@ Every command accepts `--json`, `--verbose` and `--quiet`; failures return
 | `doctor [--install-ffmpeg]` | runtime check: node, playwright, chromium, ffmpeg codecs, python deps |
 | `brief --script s.txt --out brief.json` | plan the whole video before rendering anything |
 | `compile brief.json` | validate a brief and emit project.json |
+| `shots "intent" [--brief b.json --beat 2]` | three structurally different candidates for one beat, plus the five composition passes |
 | `style [--seed N] [--swatch f.png]` | sample or inspect a visual direction |
 | `setup --provider X --key K` | configure image generation (any OpenAI-compatible API) |
 | `imagegen "prompt" --out f.png` | generate one image, or every image a project needs |
@@ -267,6 +268,14 @@ pass, and the list of skeletons that are already used up:
 - **Sound effects carry their licence.** `vs.py sfx` searches Freesound CC0-only by default,
   converts what it fetches to 48 kHz wav, and appends a `CREDITS.md` row; CC BY is opt-in with
   `--licence by`, and BY-SA / NC / Sampling+ need `--allow-risky` (never for a commercial cut).
+- **Search, do not one-shot.** Before writing a scene, run `vs.py shots "<intent>"` and keep three
+  candidates that differ on macrostructure and generative operator - three colourways of one
+  layout is not a search. Sketch each to pass 1 (blocking) only, compare them with `rehearse` /
+  `scrub`, score them (still frame / one sentence / not in the graveyard / implementable from `t`),
+  then build the winner; the losers go into the §7 graveyard.
+- **Build the frame in passes.** Blocking, then hierarchy, colour, motion, finish, each behind its
+  own gate. Passes 3-5 are gated behind 1-2: surface polish cannot rescue a structure that never
+  held ([references/choreography.md](references/choreography.md) §1.5, §4.0).
 - **Overlap the handoffs.** A transition whose exit finishes before its entrance begins reads as a
   slide deck however good the easing is; letting the two windows share 40-60% of their duration
   removes it, and whole-frame moves stay under ~1.2s with most of their change up front.
@@ -309,9 +318,10 @@ pass, and the list of skeletons that are already used up:
   and how to vendor them offline, plus design and storyboarding vocabulary with copy-ready
   prompts: [references/prompts.md](references/prompts.md). Written in Chinese, because it is
   aimed at the Chinese-language tutorial ecosystem.
-- How to compose a shot for this video instead of selecting a template - the seven-step loop,
-  the macrostructures, the six generative operators for inventing a mechanic, motion tokens,
-  the twelve timeline laws, the slop gates and the used-skeleton graveyard:
+- How to compose a shot for this video instead of selecting a template - the three-candidate
+  structure search, the five composition passes, the macrostructures, the six generative
+  operators for inventing a mechanic, motion tokens, the twelve timeline laws, the slop gates
+  and the used-skeleton graveyard:
   [references/choreography.md](references/choreography.md). Written in Chinese.
 - Aesthetic gates - proportion, type-scale jump, colour budget, ink ratio, reference traditions
   and the AI-slop blacklist: [references/taste.md](references/taste.md). Written in Chinese.

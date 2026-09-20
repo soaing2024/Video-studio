@@ -99,6 +99,13 @@ python scripts/api_index.py
 vs.py api preview
 ```
 
+### shots — 
+
+```bash
+vs.py shots "这一拍要让观众明白什么"
+vs.py shots --brief brief.json --beat 2 --json
+```
+
 ### sfx — 
 
 ```bash
@@ -123,6 +130,7 @@ vs.py sfx --get 12345 --out assets/sfx --name whoosh-01
 | `sprite` |  | `--out`, `--width`, `--height`, `--colors`, `--alpha-cutoff`, `--verbose`, `--quiet`, `--limit` |
 | `beats` |  | `--sensitivity`, `--min-gap`, `--cuts`, `--min-len`, `--verbose`, `--quiet`, `--limit` |
 | `sfx` |  | `--get`, `--token`, `--access-token`, `--test`, `--licence`, `--top`, `--sort`, `--min-dur`, `--max-dur`, `--out`, `--name`, `--quality`, `--kind`, `- |
+| `shots` |  | `--brief`, `--beat`, `--count`, `--seed`, `--duration`, `--verbose`, `--quiet`, `--limit` |
 | `init` |  | `--name`, `--duration`, `--verbose`, `--quiet`, `--limit` |
 | `render` |  | `--jobs`, `--force`, `--seed`, `--verbose`, `--quiet`, `--limit`, `--slices`, `--preset`, `--jpeg`, `--reboot`, `--incremental`, `--no-gpu` |
 | `assemble` |  | `--out`, `--verbose`, `--quiet`, `--limit` |

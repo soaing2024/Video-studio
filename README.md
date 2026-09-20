@@ -37,7 +37,7 @@ python ~/.codex/skills/video-studio/scripts/vs.py selftest
 
 ## 使用约定：先对话，确认后一次出片，非必要不试帧
 
-以下四条是对所有使用者的约定，AI 代理调用本技能时必须遵守，人工直接跑命令时也建议按同一节奏来。
+以下六条是对所有使用者的约定，AI 代理调用本技能时必须遵守，人工直接跑命令时也建议按同一节奏来。
 
 **一、先对话，再创作。** 一句话需求不等于一份 brief。代理不会拿到需求就开写，而是先和你来回沟通几轮，把片子问清楚：给谁看、在哪个平台播、多长、要让人记住什么或做什么、语气是什么（以及不要是什么）、有没有旁白/配乐/现成素材/品牌规范、有没有喜欢或明确不要的参考。每轮只问几个关键问题，并复述“已经定了什么、还差什么”。
 
@@ -46,6 +46,15 @@ python ~/.codex/skills/video-studio/scripts/vs.py selftest
 **三、一次编写，一次渲染，直接导出。** 方案确认后，配置只写一遍、成片只渲一遍，渲完直接导出交付文件。整片 `run` 是交付动作而不是试错动作：不做“先渲一版看看”，不为比较方案反复全片渲染。交付后发现问题，就改配置、重新确认、再交付一轮，而不是把渲染当成迭代器。
 
 **四、非必要不 preview。** 不看单帧是默认状态。设计上的取舍在方案阶段就想清楚（构图、字号跳跃、色彩预算、素材是否齐备），不要靠逐拍试帧来找感觉。只有出现一个具体的、纸面上说不清的疑问时（素材到底有没有加载进来、字体回退成什么样、这个构图在实际画幅里立不立得住），才渲那一帧去回答它，并说明这一帧是为了回答什么。preview 不是全片渲染，但把每一拍都试一遍，只是换了个便宜名字的“边看边改”。
+
+**五、结构搜索，而不是一次成型。** 每一拍先出**三个结构不同**的候选（宏观结构 / 生成算子不同，
+不是配色不同），各自只做到“骨架”这一步，用 `rehearse` 或 `scrub` 横向比一次，按静帧、可讲清、
+不撞查重表、可实现四条打分，选一个继续做。落选的写进查重表，下一支不再撞。
+命令：`python vs.py shots "<这一拍的 intent>"`。
+
+**六、逐步构图，结构先于皮肤。** 一帧分五步搭：骨架 → 层级 → 色彩 → 运动 → 质感，每步一道闸门
+（缩到 160px 还读得出来 / 第一眼落在主元素 / 转灰度层级不塌 / 关掉动效静帧成立 / 关掉 finish
+结构不变差）。前三步没立住之前不要碰颗粒、辉光和调色——它们只加分，不救结构。
 
 ---
 
@@ -57,10 +66,13 @@ python ~/.codex/skills/video-studio/scripts/vs.py selftest
 # 1. 建项目（生成一份配置 + 一个空白场景文件）
 python vs.py init 我的项目 --duration 20
 
-# 2.（可选，非必要不做）只有纸面上判断不了的疑问，才渲一帧回答它
+# 2. 每一拍先出三个结构候选，各自只做骨架，横向比一次再选
+python vs.py shots "这一拍要让观众明白什么" --brief brief.json --beat 2
+
+# 3.（可选，非必要不做）只有纸面上判断不了的疑问，才渲一帧回答它
 python vs.py preview 我的项目\project.json --segment title --at 2.5
 
-# 3. 出片：渲染 + 剪辑 + 验收
+# 4. 出片：渲染 + 剪辑 + 验收
 python vs.py run 我的项目\project.json --jobs 3
 ```
 
@@ -76,6 +88,7 @@ python vs.py run 我的项目\project.json --jobs 3
 | `doctor [--install-ffmpeg]` | 环境检查 / 自动装 ffmpeg |
 | `brief --script 台词.txt --out brief.json` | **生成前完整规划**：分幕、分镜、视觉手段、图片提示词 |
 | `compile brief.json` | 校验规划并编译成可渲染的 project.json |
+| `shots "<intent>" [--brief b.json --beat 2]` | 一拍的结构搜索：三个结构不同的候选 + 五步构图闸门 |
 | `style [--seed N] [--swatch f.png]` | 采样/查看一套视觉方向（配色、构图、动态） |
 | `setup --provider X --key K` | 配置图片生成（任意 OpenAI 兼容平台） |
 | `imagegen "提示词" --out f.png` | 生成单张图片，或生成工程里声明的全部图片 |
@@ -440,8 +453,8 @@ python scripts/taste_check.py my-video/my-video.mp4     # 渲染后：节奏 + �
 
 ## 高级技法提示词库
 
-[references/prompts.md](references/prompts.md) 是一份可以直接投喂给 AI 的提示词库（中文），
-覆盖三类“高级”内容：
+[references/prompts.md](references/prompts.md) 是一份可以直接投喂给 AI 的提示词库（中文，
+已精简为只保留可执行的选型、约束与模板），覆盖三类内容：
 
 - **色彩与色阶**：chroma-js / colorjs.io / culori / d3-scale 的选型与授权，sequential /
   diverging / qualitative 三种色阶，LCh 感知均匀插值，对比度与色盲校验。另外把容易混淆的

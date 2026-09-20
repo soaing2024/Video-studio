@@ -7,6 +7,7 @@
     python vs.py sprite <image> [--out dir] [--width 64 --height 96 --colors 12]
     python vs.py beats <audio> [--cuts <seconds>]
     python vs.py sfx "<query>" [--get ID] [--out assets/sfx]
+    python vs.py shots "<intent>" [--brief brief.json --beat 2]
     python vs.py init <dir> [--name x] [--duration 20]
     python vs.py render <project.json> [--jobs N] [--force]
     python vs.py assemble <project.json> [--out out.mp4]
@@ -151,6 +152,40 @@ def cmd_sfx(args) -> int:
                      credits=args.credits, allow_risky=args.allow_risky, dry_run=args.dry_run)
     fmt.emit(rep, human=sfxmod.human(rep))
     return 0 if rep.get("ok") else 1
+
+
+def cmd_shots(args) -> int:
+    """Structurally different candidates for one beat: search before writing the shot."""
+    intent = (args.intent or "").strip()
+    meta = {}
+    if args.brief:
+        try:
+            brief = brief_mod.load(args.brief)
+        except Exception as e:      # a project.json is not a brief.json
+            raise fmt.fail("BAD_BRIEF", args.brief, "a brief.json", str(e)[:120],
+                           "produce one with: vs.py brief --script <file> --out brief.json")
+        beats = ((brief.get("take") or {}).get("timeline")
+                 or brief.get("structure") or brief.get("timeline") or [])
+        if not beats:
+            raise fmt.fail("NO_BEATS", args.brief, "a brief with a timeline", "empty",
+                           "run `vs.py brief --script <file> --out brief.json` first")
+        want = int(args.beat or 1)
+        beat = next((b for b in beats if int(b.get("index") or 0) == want), None)
+        if beat is None:
+            beat = beats[min(max(want, 1), len(beats)) - 1]
+        intent = intent or str(beat.get("intent") or beat.get("on_screen") or "").strip()
+        meta = {"beat": beat.get("index"), "on_screen": beat.get("on_screen"),
+                "device": beat.get("device"), "seconds": beat.get("seconds"),
+                "brief": args.brief}
+    if not intent:
+        raise fmt.fail("NO_INTENT", "vs.py shots", "one sentence of intent", "empty",
+                       'try: vs.py shots "这一拍要让观众明白什么"')
+    rep = choreography.candidates(intent, count=args.count, seed=args.seed,
+                                  duration=args.duration)
+    rep.update(meta)
+    fmt.emit(rep, human=choreography.candidates_human(rep))
+    return 0
+
 
 
 def cmd_init(args) -> int:
@@ -606,6 +641,15 @@ def build_parser() -> argparse.ArgumentParser:
                     help="accept BY-SA / NC / Sampling+ (not a commercial deliverable)")
     sf.add_argument("--dry-run", action="store_true", help="print the request, send nothing")
     sf.set_defaults(func=cmd_sfx)
+
+    sh = sub.add_parser("shots", help="three structurally different candidates for one beat")
+    sh.add_argument("intent", nargs="?", help="one sentence: what the viewer must understand")
+    sh.add_argument("--brief", help="read the beat from a brief.json instead")
+    sh.add_argument("--beat", type=int, help="beat index in that brief (default 1)")
+    sh.add_argument("--count", type=int, default=3, help="candidates to generate (2-5)")
+    sh.add_argument("--seed", type=int, help="fix the candidate set")
+    sh.add_argument("--duration", type=float, help="beat length, for the pass plan")
+    sh.set_defaults(func=cmd_shots)
 
     ini = sub.add_parser("init", help="scaffold a project directory")
     ini.add_argument("dir", nargs="?", default=".")
