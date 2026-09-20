@@ -944,6 +944,10 @@ def _inject_common(parser):
         r = _sp.run([c for c in cmd if c], capture_output=True, text=True, encoding="utf-8",
                     errors="replace")
         sys.stdout.write(r.stdout)
+        # Forward stderr too: a scene_check that dies before printing (missing scene file, bad
+        # JSON) used to leave the caller with an exit code and no explanation at all.
+        if r.stderr:
+            sys.stderr.write(r.stderr)
         if r.returncode not in (0, 1):
             return fmt.report_error(fmt.fail("CHECK_FAILED", args.project, "scene_check runs",
                                             r.stderr.strip()[-200:],

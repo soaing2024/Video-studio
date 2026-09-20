@@ -159,8 +159,13 @@ def main(argv=None) -> int:
 
     spec = specmod.load(args.project)
     ffmpeg, node = runtime.find_ffmpeg(), runtime.find_node()
-    scan = run_scan(spec, ffmpeg, node, args.stride)
-    calib = {} if args.no_calibrate else calibrate(spec, ffmpeg, node)
+    # A VsError (missing scene, unusable scan) has to come out as the structured error contract,
+    # not as a traceback: the caller (vs.py check) only forwards structured output.
+    try:
+        scan = run_scan(spec, ffmpeg, node, args.stride)
+        calib = {} if args.no_calibrate else calibrate(spec, ffmpeg, node)
+    except fmt.VsError as e:
+        return fmt.report_error(e)
 
     ghosts = [{"id": k, "tag": v["tag"], "text": v["text"], "size": v["size"], "from": v["spans"][0][0]}
               for k, v in scan.get("visibility", {}).items()
