@@ -55,6 +55,9 @@ const rebootEvery = Number(a.reboot || 0);
 const fastPng = String(a["png-compression"] || "fast") !== "default";
 const jpeg = a.jpeg ? Number(a.jpeg) : 0;
 const gpu = String(a.gpu === undefined ? "true" : a.gpu) !== "false";
+// Draft mode: the CSS layout stays at `width x height` (so composition is honest) while the
+// captured image is scaled down. Only CDP can do that; Playwright's own screenshot cannot.
+const scale = Number(a.scale || 1);
 
 const GPU_ARGS = ["--use-angle=d3d11", "--enable-gpu-rasterization", "--enable-zero-copy",
                   "--ignore-gpu-blocklist", "--enable-unsafe-swiftshader"];
@@ -64,7 +67,11 @@ const consoleErrors = [];
 
 async function boot() {
   const browser = await playwright.chromium.launch({ args: gpu ? GPU_ARGS : [] });
-  const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
+  // Draft capture scales with deviceScaleFactor, not with a CDP clip: the CSS layout stays at
+  // width x height (so composition is honest) while the rasterised image comes back smaller.
+  // A clip scale silently produced invalid frames on this Chromium build, which killed the
+  // encoder and then hung the render loop on a drain that never came.
+  const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: scale });
   page.on("pageerror", (e) => errors.push(String(e)));
   page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text().slice(0, 200)); });
   await page.addInitScript((scene) => { window.SCENE = scene; }, data);
@@ -145,6 +152,16 @@ const STATE = () => {
   return h >>> 0;
 };
 
+// One frame's worth of paint. requestAnimationFrame can stall when the compositor is not
+// producing frames (software rasterisation, a hidden page, a slow first paint), and the
+// renderer must never wait forever on it: the timer is the escape hatch.
+const paint = (page) => page.evaluate(() => new Promise((r) => {
+  let done = false;
+  const finish = () => { if (!done) { done = true; r(); } };
+  requestAnimationFrame(finish);
+  setTimeout(finish, 40);
+}));
+
 async function grab(page, cdp) {
   if (jpeg) return page.screenshot({ type: "jpeg", quality: jpeg });
   if (fastPng && cdp) {
@@ -158,6 +175,7 @@ async function grab(page, cdp) {
 }
 
 let session = await boot();
+if (a.debug) process.stderr.write(`[dbg] booted scale=${scale}\n`);
 let cdp = fastPng ? await session.page.context().newCDPSession(session.page).catch(() => null) : null;
 
 if (a.sig) {
@@ -165,7 +183,7 @@ if (a.sig) {
   const sigs = [];
   for (let i = 0; i < total; i += stride) {
     await session.page.evaluate((tt) => window.seek(tt), i / fps);
-    await session.page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r())));
+    await paint(session.page);
     sigs.push(await session.page.evaluate(STATE));
   }
   await session.browser.close();
@@ -179,7 +197,7 @@ if (a.sig) {
 if (a.still) {
   const at = Number(a.still);
   await session.page.evaluate((t) => window.seek(t), at);
-  await session.page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r())));
+  await paint(session.page);
   const buf = await grab(session.page, cdp);
   const out = a["still-out"] || "still.png";
   fs.mkdirSync(path.dirname(path.resolve(out)), { recursive: true });
@@ -229,8 +247,10 @@ for (let i = 0; i < total; i++) {
   if (!buf) {
     try {
       await session.page.evaluate((tt) => window.seek(tt), t);
-      await session.page.evaluate(() => new Promise((r) => requestAnimationFrame(() => r())));
+      await paint(session.page);
+      if (a.debug) process.stderr.write(`[dbg] f${i} painted\n`);
       buf = await grab(session.page, cdp);
+      if (a.debug) process.stderr.write(`[dbg] f${i} grabbed ${buf.length}\n`);
     } catch (e) {
       fail("FRAME_FAILED", `${path.basename(a.scene)} @ t=${t.toFixed(3)}s (frame ${i}/${total})`,
            "seek(t) returns without throwing",
@@ -241,7 +261,26 @@ for (let i = 0; i < total; i++) {
     lastBuf = buf;
     distinct += 1;
   }
-  if (!ff.stdin.write(buf)) await once(ff.stdin, "drain");
+  if (!ff.stdin.write(buf)) {
+    // Wait for capacity, but never past the encoder's own death. A dead ffmpeg used to mean
+    // an unbounded wait here instead of an error message, because 'close' had already
+    // fired before anyone listened for it.
+    const dead = (ff.exitCode !== null) || ff.killed;
+    if (!dead) {
+      await Promise.race([
+        once(ff.stdin, "drain"),
+        once(ff.stdin, "error").catch(() => null),
+        new Promise((r) => setTimeout(r, 30000)),
+      ]);
+    }
+    if (ff.exitCode !== null && ff.exitCode !== 0) {
+      fail("FFMPEG_FAILED", `libx264 -> ${path.basename(a.out)} at frame ${i}/${total}`,
+           "the encoder accepts piped frames", `exit ${ff.exitCode}`,
+           "re-run with --progress 1 to see how far it got; note that a scaled screenshot " +
+           "must stay PNG, because Chromium emits progressive JPEGs at deviceScaleFactor " +
+           "below 1 and ffmpeg's pipe probe cannot detect them", ffStderr);
+    }
+  }
   if (a.progress && i % Number(a.progress) === 0) {
     process.stderr.write(`\r${i}/${total} ${((Date.now() - t0) / Math.max(1, i + 1)).toFixed(0)} ms/frame`);
   }

@@ -87,6 +87,7 @@ python vs.py run 我的项目\project.json --jobs 3
 | `montage <素材目录> --music 音乐.mp3 --out 项目.json` | 从素材文件夹自动生成混剪工程 |
 | `init <目录> [--duration N]` | 新建工程（含一个待写的场景） |
 | `libs [--install 名称...]` | 看已落盘的浏览器库，或从 npm 装一个（只在构建时联网） |
+| `sfx "whoosh" [--get ID] [--out 目录]` | Freesound 找音效 / 取一条：默认只搜 CC0，自动转 wav 并写 CREDITS |
 | `plan <项目>` | 空跑：问题清单、缓存命中、预计渲染时长 |
 | `preview <项目> [--segment id] [--at 2.0]` | 渲单帧，仅当纸面判断不了具体疑问时用 |
 | `render <项目> [--jobs N] [--slices N] [--force]` | 只渲染（命中缓存或未变切片则跳过） |
@@ -175,6 +176,7 @@ python vs.py libs --install anime       # 需要时才从 npm 取一次（构建
 | `lucide` 1.47（2108 个图标） | ISC | `Scene.icon("arrow-right", { size: 64, color: "#e0455f" })` |
 | `lottie` 5.13 | MIT | `Anim.lottie(host, SCENE.assets.motion, { fps: 30 }).seek(t)` |
 | `anime` 4.5 | MIT | `Anim.timeline(3, (tl) => tl.add(el, { x: [0, 200], duration: 2000 })).seek(t)` |
+| `chroma-js` 3.2 | BSD-3-Clause AND Apache-2.0 | `chroma.scale(["#0d1b2a", "#3cd3d4"]).mode("lch").colors(7)`，纯函数，无需 seek |
 | `d3-scale` 4.0（需要时再装） | ISC | 纯函数，直接算坐标与刻度 |
 | `three` 0.186 | MIT | `Scene.three()` / `Scene.css3d()` / `Scene.surface()`，在 `seek(t)` 里调 `render()` |
 
@@ -190,7 +192,7 @@ const s   = Scene.surface(512, 320);  // 2D 画布 → THREE.CanvasTexture
 window.seek = (t) => { mesh.rotation.y = t * .55; view.render(); css.render(); };
 ```
 
-three 是唯一需要打包的库：官方从 r150 起只发 ESM，`vs.py libs --install three` 会调一次 esbuild 把它打成单文件 IIFE。
+three 与 chroma-js 需要打包：官方产物只有 ESM/CJS，`vs.py libs --install three`（或 chroma-js）会调一次 esbuild 打成单文件 IIFE，渲染时离线注入。
 WebGL 在本机是软件渲染，1280×720 + bloom 实测约 0.2 秒/帧；**3D 同样只能按 `t` 求值**。
 四种组合方式（3D 垫底 + DOM 文字 / CSS3D / Canvas 贴图 / bloom 只作用于 3D）、镜头光照默认值与禁忌清单，
 见 [references/three-d.md](references/three-d.md)。
@@ -345,6 +347,21 @@ python vs.py run 项目\project.json
 语音按内容哈希缓存，不会重复合成。
 
 > 目前语音合成走 Windows 的 SAPI，其他系统可自行录音或接外部 TTS，把音频挂到 `audio.tracks`。
+
+---
+
+## 音效：Freesound（可选）
+
+```powershell
+python vs.py sfx "whoosh transition" --top 8             # 默认只搜 CC0
+python vs.py sfx --get 12345 --out assets/sfx --name whoosh-01
+python vs.py sfx --token <APIKEY> --test                 # key 存在 ~/.video-studio，不进仓库
+```
+
+取回来的音效会转成 48 kHz wav、跑一次 `probe` 报时长与电平，并在 `assets/CREDITS.md` 追加授权记录，
+输出里还会给出可以直接粘进 `audio.tracks` 的片段。`--licence by` 才搜 CC-BY（会写署名行）；
+BY-SA / NC / Sampling+ 默认拒绝，只有 `--allow-risky`（个人非商用）才放行。Freesound 的原始上传文件
+需要 OAuth2（`VS_FREESOUND_ACCESS_TOKEN`），默认走它的 HQ 试听 MP3，做混音够用。
 
 ---
 
@@ -538,8 +555,8 @@ video-studio/
 代码采用 MIT（见 `LICENSE`）。源码仓库不包含 ffmpeg 与 Chromium（`vendor/` 被 `.gitignore` 排除），
 本机安装时按需落盘。
 
-`assets/lib/` 下随仓库分发四个可选的浏览器库：Lucide（ISC）、lottie-web（MIT）、anime.js（MIT）、
-three（MIT）；d3-scale（ISC）用 `vs.py libs --install d3-scale` 按需落盘。每个库目录都带自己的
+`assets/lib/` 下随仓库分发五个可选的浏览器库：Lucide（ISC）、lottie-web（MIT）、anime.js（MIT）、
+three（MIT）、chroma-js（BSD-3-Clause AND Apache-2.0）；d3-scale（ISC）用 `vs.py libs --install d3-scale` 按需落盘。每个库目录都带自己的
 `LICENSE` 与记录包名/版本/来源/sha256 的
 `manifest.json`；它们都是宽松许可，可随本项目一起分发。GSAP 这类“免费但非 OSI 开源”的库不默认落盘。
 

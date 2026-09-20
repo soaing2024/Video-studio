@@ -50,13 +50,14 @@ python vs.py libs --install lottie     # 内部就是 npm pack + 解包 + 留 di
 装好后在工程里写 `"libs": ["lottie"]`，渲染器会把它注入页面。**场景里不要写 `<script src>`**：
 场景文件会被复制进工程，相对路径会断。**不要用 CDN，不要留 node_modules。**
 
-已经落盘并接进流水的五个（`assets/lib/`，随仓库走，渲染时离线）：
+已经落盘并接进流水的六个（`assets/lib/`，随仓库走，渲染时离线）：
 
 | 名字 | 授权 | 用途 | 怎么驱动 |
 | --- | --- | --- | --- |
 | `lucide` | ISC | 2108 个线性图标 | `Scene.icon(name, opts)` |
 | `lottie` | MIT | AE/Bodymovin 导出的 MG 动效 | `Anim.lottie(host, data, {fps}).seek(t)` |
 | `anime` | MIT | 时间轴与补间 | `Anim.timeline(秒数, build).seek(t)` |
+| `chroma-js` | BSD-3-Clause AND Apache-2.0 | 感知均匀色阶（LCh / OKLCh）、Brewer 色板、明度与对比度校验 | `chroma.scale([...]).mode('lch').colors(7)`（纯函数，不需要 seek） |
 | `d3-scale` | ISC | 比例尺、刻度（纯函数） | 不装也行，装了不用 seek |
 | `three` | MIT | WebGL 场景 + CSS3D + 像素级辉光 | `Scene.three()` / `Scene.css3d()`，在 `seek(t)` 里调 `render()` |
 
@@ -133,7 +134,7 @@ arrow.style.transform = `translateX(${(t * 120).toFixed(1)}px)`;   // 动效自�
 
 | 源 | 授权 | 取用方式 | 备注 |
 | --- | --- | --- | --- |
-| **Freesound** | **逐条授权**：CC0 / CC-BY / CC-BY-NC / Sampling+ 混在一起 | REST API，**需要账号与 token**（✔ 实测无 token 返回 `401`） | 音效最全；**必须按授权筛选**，CC-BY 要署名，NC 不能商用 |
+| **Freesound** | **逐条授权**：CC0 / CC-BY / CC-BY-NC / Sampling+ 混在一起 | REST API，**已接进 `vs.py sfx`**（需要免费 API key/token；✔ 实测无 token 返回 `401`） | 音效最全；**必须按授权筛选**，CC-BY 要署名，NC 不能商用 |
 | **Pixabay Music / SFX** | Pixabay Content License | REST API 需 key（✔ 无 key `400`） | 配乐与音效都有，轻量 |
 | **Mixkit** | Mixkit License：免费商用、无需署名；不可原样转售 | 手动下载 | 免费音效/配乐，风格偏"干净" |
 | **ZapSplat** | 免费档**要求署名**；付费档免署名 | 手动下载 | 音效库大，注意免费档条款 |
@@ -148,6 +149,19 @@ arrow.style.transform = `translateX(${(t * 120).toFixed(1)}px)`;   // 动效自�
 - **CC-BY** 可以商用，但必须在成片或说明里署名（作者 + 标题 + 授权 + 链接）。
 - **CC-BY-NC / Sampling+ / 仅个人教育**（含 BBC RemArc）**不能进入商用成片**。
 - 拿不准就换源，或者自己合成。
+
+**命令行取用（已接进流水）**：
+
+```powershell
+python vs.py sfx "whoosh transition" --top 8        # 默认只搜 CC0
+python vs.py sfx --get 12345 --out assets/sfx --name whoosh-01
+python vs.py sfx --token <APIKEY> --test            # key 存在 ~/.video-studio，不进仓库
+```
+
+取回的文件会转成 48 kHz wav、跑一次 `probe` 报时长与电平，并在 `assets/CREDITS.md` 追加一行授权记录，
+同时给出可直接粘进 `audio.tracks` 的片段。`--licence by` 才搜 CC-BY（会写署名行）；
+BY-SA / NC / Sampling+ 默认拒绝，只有显式 `--allow-risky`（个人非商用）才放行。Freesound 的原始上传
+文件需要 OAuth2（`VS_FREESOUND_ACCESS_TOKEN`），默认走它的 HQ 试听 MP3，做混音够用。
 
 **落进工程**：音乐/音效走 `audio.tracks`，人声轨标 `"role": "voice"` 以启用闪避：
 
@@ -184,5 +198,5 @@ arrow.style.transform = `translateX(${(t * 120).toFixed(1)}px)`;   // 动效自�
 - **动效库**：只有能按 `t` 求值的才能进场景；能自己算的别引库。
 - **图标库**：只落盘了 Lucide；图标只在承担信息时用，不当装饰。
 - **素材库**：优先生成（`imagegen`），其次 CC0/免署名图库；**永远不用搜索引擎图片**。
-- **音效库**：Freesound 最全但授权混杂，按授权筛；BBC 只限个人教育，不能商用。
+- **音效库**：Freesound 已接进 `vs.py sfx`（默认只搜 CC0，每次取用自动写 `CREDITS.md`）；BBC 只限个人教育，不能商用。
 - **一律落盘**：渲染不联网，所有外部资源必须在渲染前进入工程目录并记录授权。

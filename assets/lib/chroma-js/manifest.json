@@ -1,0 +1,31 @@
+{
+  "name": "chroma-js",
+  "package": "chroma-js",
+  "version": "3.2.0",
+  "license": "BSD-3-Clause AND Apache-2.0",
+  "kind": "color",
+  "global": "chroma",
+  "provides": "perceptual colour scales (LCh / OKLCh), Brewer palettes, luminance and contrast checks - pure functions, no clock",
+  "drive": "chroma.scale([...]).mode('lch').colors(7); chroma.contrast(a, b)",
+  "entry": "chroma.iife.min.js",
+  "files": {
+    "chroma.iife.min.js": {
+      "from": "import chroma from \"chroma-js\";+window.chroma = chroma;+export default chroma;",
+      "sha256": "1f9cf5a2be27575436a8761828cf5bb2c487d0bb69412a9a918e800a0bb29b5b",
+      "bytes": 42391
+    }
+  },
+  "source": "https://www.npmjs.com/package/chroma-js/v/3.2.0",
+  "note": "Vendored build-time with `vs.py libs --install`. Renders never fetch this.",
+  "bundle": {
+    "tool": "esbuild@0.28.2",
+    "format": "iife",
+    "global": "chroma",
+    "footer": "",
+    "entry": [
+      "import chroma from \"chroma-js\";",
+      "window.chroma = chroma;",
+      "export default chroma;"
+    ]
+  }
+}

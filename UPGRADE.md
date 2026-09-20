@@ -4,6 +4,22 @@
 > 已不再有效。配套：`AUDIT.md`（现状审计 + 数据更正）、`PLAN.md`（原始计划）、
 > `API.md` / `api_index.json`（接口索引，自动生成）。
 
+## 0. 本次新增（润色第二轮：声音 / 光学 / 物理 / 试演）
+
+| 能力 | 入口 | 实测/说明 |
+| --- | --- | --- |
+| 光学完成度 | `look.finish`（预设 clean/film/analog/print） | LUT→影调→光晕(halation)→色散→暗角→颗粒→锐化，整片一道；光晕用 `gblur + screen`，颗粒 `noise` 固定种子可复现；暗角实测 0.30=角部 83% 亮度 |
+| 快门运动模糊 | `look.finish.shutter.samples: 2\|3` | 按 N 倍帧率渲染后 `tmix` 折叠；代价线性（N=2 翻倍渲染时间），`--slices` 自动退为 1 |
+| 音效床 | `audio.cues` + `audio.room` | 本地合成一条预混 WAV（amix 按轨数衰减，所以只当一轨）；每个 cue 由自身参数播种，顺序无关 |
+| 两遍响度母版 | `audio.master` | 先渲 premix 再测，再 `loudnorm=linear=true` 静态校正 + 限幅器（比目标低 0.4 dB，抵消 AAC 过冲）；实测修复前 −0.35 dBTP 越限 |
+| 物理运动 | 注入 `Phys`（`assets/runtime/phys.js`） | `spring / chain / ballistic / pendulum / drag / noise / handheld / bake`，全部 1/600 s 定点烘焙后插值，`Date.now`/随机源都不出现；chain 的延迟不变式实测误差 0.0000 |
+| 廉价试演 | `vs.py scrub` / `vs.py rehearse` | scrub 是交互页（空格播放、方向键逐帧、安全区），零渲染；rehearse 是 35% 像素 + 低帧率草稿 + 全片 contact sheet，写入 `build/<name>/rehearsal/`，不碰交付 clip 与缓存键 |
+| 十二原则 prompt | `references/principles-prompt.md` | 只做提示词与参数映射，不接工具；每条原则对应可执行写法与可测量判据 |
+
+本轮踩到并已记录在 pipeline.md §14 的坑：低于 1 的 `deviceScaleFactor` 会产出**渐进式 JPEG**，
+ffmpeg 的 `image2pipe` 只解析不解码、直接判定 codec 未知 —— 缩放草稿因此必须用 PNG；
+以及 ffmpeg 先死时 `drain` 会永久挂住（现在先查 `exitCode` 并加超时）。
+
 ## 1. 语义没变
 
 `seek(t)` 纯函数、一镜到底、**一次编译一次生成** 全部保持不变。

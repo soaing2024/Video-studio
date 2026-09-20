@@ -60,7 +60,7 @@ const steps = chroma.scale(["#0d1b2a", "#3cd3d4"]).mode("lch").colors(7);
 
 两条硬指标（本项目的 `style.py` 就是按这个卡的）：
 
-- **对比度**：正文对背景 ≥ 8:1，次要文字 ≥ 4:1（`chroma(a).contrast(b)`）。
+- **对比度**：正文对背景 ≥ 8:1，次要文字 ≥ 4:1（`chroma.contrast(a, b)`）。
 - **明度阶梯**：相邻两阶的 `luminance()` 差要看得出来（≥ 0.04 左右），否则打印/小屏上会糊成一片。
 
 色盲安全：不要只用红/绿区分两类数据，同时用明度或形状（本项目的 `chart` 系列色本来就在循环色相）。
@@ -71,6 +71,7 @@ const steps = chroma.scale(["#0d1b2a", "#3cd3d4"]).mode("lch").colors(7);
 | --- | --- |
 | 整片强调色 / 系列色 | `style.signature.colors`（种子生成，`visual_plan` 再逐拍把强调色循环分配） |
 | 图表、数据条的配色 | `chart` 模板的 `series[].color`、`rows[].color` |
+| 图表/数据条的色阶 | `"libs": ["chroma-js"]` + `chroma.scale([...]).mode('lch').colors(7)` |
 | 整片调色（饱和度/对比度） | `look.grade`（ffmpeg 侧） |
 | 像素风预设 | `assets/palettes.json`（`pixel16` / `gameboy` / `mono`） |
 
@@ -176,8 +177,8 @@ cp package/LICENSE      assets/lib/<name>/LICENSE     # 授权说明必须跟着
 
 模板里引本地文件：
 
-```html
-<script src="../lib/chroma-js/chroma.min.js"></script>
+```jsonc
+{ "libs": ["chroma-js"] }        // 一次 `python vs.py libs --install chroma-js`，渲染时离线注入
 ```
 
 **为什么放 `assets/lib/` 而不是 `node_modules`**：这个技能要求离线可跑、目录可移植，
@@ -195,7 +196,7 @@ cp package/LICENSE      assets/lib/<name>/LICENSE     # 授权说明必须跟着
 - **别用库自带的"自动播放"**：所有动画都应该是"我给它 `t`，它给我这一帧"。
 - **只发 ESM 的包不能直接注入**：`addInitScript` 是把文件当**函数体**执行的，既没有模块加载器，
   裸 `var THREE` 也只会变成函数里的局部变量。要么选有 UMD 产物的版本，要么在 vendor 时用 esbuild
-  打成 IIFE，并在末尾用 footer 显式写 `window.THREE=THREE;`——three 就是这么接进来的。
+  打成 IIFE，并在末尾用 footer 显式写 `window.THREE=THREE;`——three 与 chroma-js 就是这么接进来的（chroma 的 footer 写 `window.chroma`）。
 
 ### 提示词模板
 

@@ -78,6 +78,27 @@ REGISTRY: dict[str, dict] = {
         "provides": "linear / band / log / ordinal scales and ticks - pure functions",
         "drive": "no clock at all: value at t is just f(t)",
     },
+    # chroma-js v3 publishes CJS + ESM source only (no classic browser build), so it takes the
+    # same esbuild route as three. Pure functions: a colour at t is just f(t).
+    "chroma-js": {
+        "package": "chroma-js",
+        "version": "3.2.0",
+        "license": "BSD-3-Clause AND Apache-2.0",
+        "kind": "color",
+        "global": "chroma",
+        "bundle": {
+            "out": "chroma.iife.min.js",
+            "esbuild": "0.28.2",
+            # The entry does the window assignment itself: a footer carrying `||` breaks the
+            # npx -> cmd.exe argument chain on Windows, which silently drops --outfile.
+            "entry": ['import chroma from "chroma-js";',
+                      'window.chroma = chroma;',
+                      'export default chroma;'],
+        },
+        "provides": ("perceptual colour scales (LCh / OKLCh), Brewer palettes, luminance "
+                     "and contrast checks - pure functions, no clock"),
+        "drive": "chroma.scale([...]).mode('lch').colors(7); chroma.contrast(a, b)",
+    },
     # three ships ESM only since r150 and the injection path has no module loader, so it is
     # bundled into one classic script at vendor time.
     "three": {
@@ -110,6 +131,9 @@ REGISTRY: dict[str, dict] = {
 }
 
 ALIASES = {
+    "chroma": "chroma-js",
+    "chromajs": "chroma-js",
+    "chroma.js": "chroma-js",
     "lucide-icons": "lucide",
     "lottie-web": "lottie",
     "animejs": "anime",
@@ -309,7 +333,7 @@ def _install_one(npm: str, key: str, reg: dict, log) -> dict:
             "tool": f"esbuild@{reg['bundle']['esbuild']}",
             "format": "iife",
             "global": reg["global"],
-            "footer": reg["bundle"]["footer"],
+            "footer": reg["bundle"].get("footer", ""),
             "entry": reg["bundle"]["entry"],
         }
     (dest / "manifest.json").write_text(
@@ -336,10 +360,18 @@ def _build_bundle(spec: str, reg: dict, pkg: Path, dest: Path, log) -> dict:
     npx = shutil.which("npx") or shutil.which("npx.cmd")
     if not npx:
         raise LibError("npx not found. Bundling an ESM-only package needs it once, at vendor time.")
+    footer = str(b.get("footer") or "")
+    if any(c in footer for c in "|&^<>"):
+        raise LibError(
+            f"the bundle footer for {spec} contains a character cmd.exe treats specially "
+            f"({footer!r}); npx runs through the shell on Windows - put the assignment in "
+            f"the bundle entry instead")
     cmd = [npx, "--yes", f"esbuild@{b['esbuild']}", str(entry),
            "--bundle", "--format=iife", f"--global-name={reg['global']}",
-           "--minify", "--target=es2020", "--legal-comments=none",
-           f"--footer:js={b['footer']}", f"--outfile={out}"]
+           "--minify", "--target=es2020", "--legal-comments=none"]
+    if footer:
+        cmd.append(f"--footer:js={footer}")
+    cmd.append(f"--outfile={out}")
     proc = _run(cmd, cwd=work)
     if proc.returncode != 0 or not out.is_file():
         raise LibError(f"esbuild failed for {spec}:\n{proc.stdout}\n{proc.stderr}")

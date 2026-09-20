@@ -114,6 +114,13 @@ python vs.py beats assets/track.mp3 --cuts 45 --min-len 0.8
 ]
 ```
 
+**音效**：Freesound 已接进 CLI，默认只搜 CC0 并自动写授权记录。
+
+```powershell
+python vs.py sfx "whoosh" --top 8
+python vs.py sfx --get 12345 --out assets/sfx --name whoosh-01
+```
+
 ## 图标、动效与 3D（可选）
 **图标与动效库**：工程里写 `"libs": ["lucide", "lottie", "anime"]`，渲染器会把库注入页面，场景里不用写 `<script src>`。
 
@@ -136,7 +143,7 @@ window.seek = (t) => { mesh.rotation.y = t; view.render(); css.render(); };
 
 注意：WebGL 是软件渲染（实测 1280×720 + bloom 约 0.2 秒/帧），3D 也必须只按 `t` 求值。
 四种 2D×3D 组合方式、镜头光照默认值与禁忌清单见 [three-d.md](three-d.md)。
-已落盘：`lucide`（ISC，2108 图标）、`lottie`（MIT）、`anime`（MIT）；需要其他库先 `python vs.py libs --install <名字>`。
+已落盘：`lucide`（ISC，2108 图标）、`lottie`（MIT）、`anime`（MIT）、`chroma-js`（BSD-3-Clause AND Apache-2.0，感知均匀色阶）；需要其他库先 `python vs.py libs --install <名字>`。
 能自己用纯函数写出来的动效，仍然不要引库（规则与授权见 [libraries.md](libraries.md)）。
 
 ## 出片前检查

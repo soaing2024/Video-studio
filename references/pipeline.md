@@ -177,3 +177,91 @@ resolution → `fps: 24` for long-form → `--slices N` for parallel rendering o
   available; keep it deterministic and duration-aware.
 - **New quality gate:** add a measurement to `verify.py` and check the actual invariant, not the
   wording of a message.
+
+## 11. Optical finish (`look.finish`)
+it is the delivered file that `verify` measures. Measured here: a -1.0 dBTP limiter left the
+encoded file at -0.35 dBTP and failed its own gate.
+
+`verify` now gates two things it used to ignore: `mastering` (integrated LUFS within ±1.5 of the
+declared target, true peak within +0.4 dB of it) and a cue-only mix, which is allowed to sit
+louder than a background bed because the cues *are* the programme. Cue-only projects used to
+fail `audio_present` with "no audio configured" - a bug the smoke test caught.
+
+## 13. Rehearsal: the cheap half of the loop
+
+```bash
+python scripts/vs.py scrub <project> [--open]           # interactive, no render at all
+python scripts/vs.py rehearse <project> --at 3:9 --scale 0.35 --fps 12
+```
+
+`scrub` copies the scene, injects the same runtimes the renderer injects, sets `window.SCENE`,
+and appends a transport bar (play, scrub, ±1 frame, 0.25–2×, safe-area overlay). Arrows step a
+frame, shift+arrows jump a second. It writes `build/<name>/scrub.html` and renders nothing.
+
+`rehearse` renders a draft with `deviceScaleFactor = scale` at a reduced fps, and with
+`--scale` ≠ 1 it forces PNG (see the failure mode below). It writes to
+`build/<name>/rehearsal/`, never to `build/<name>/segments/`, so no cache key and no delivery
+clip is touched. `--at a:b` rehearses one window; the scene must treat the `t` it is given as
+absolute take time (the payload carries `offset`).
+
+Measured on the selftest scene: a 30 s 1080p take is ~14 s of wall clock as a draft and ~4
+minutes as a delivery render. That ratio is the whole point.
+
+## 14. Failure modes added by this layer
+
+14. **Progressive JPEG cannot be piped.** Chromium emits *progressive* JPEG at
+    `deviceScaleFactor` below 1. ffmpeg's `image2pipe` demuxer **parses** to find frame
+    boundaries (it does not decode), cannot parse progressive, and dies with "Could not find
+    codec parameters" - after which the renderer waited forever on a broken pipe. A scaled
+    draft must stay PNG; full-size `--jpeg` preflights are baseline and still fine.
+15. **A dead encoder must not mean an infinite wait.** `ff.stdin.write()` returning false and
+    then awaiting only `drain` hangs forever when ffmpeg already exited: checking
+    `ff.exitCode` *before* racing the events, plus a timeout, is what makes the failure
+    legible. `once(ff, "close")` cannot be relied on: the event may have fired already.
+16. **`requestAnimationFrame` can stall.** With software rasterisation or a hidden page, rAF
+    may never fire, and every frame becomes an infinite wait. The renderer now races rAF
+    against a 40 ms timer before grabbing.
+17. **`colorlevels` cannot amplify.** `rimax` is capped at 1.0, so a highlight glow has to be
+    re-expanded with a `curves` point, not a gain.
+
+Everything before this stage is vector-accurate: flat fields, hard edges, no light behaviour.
+The finish chain is the one place where the whole frame gets lens/emulsion treatment, and it
+sits **after the fold** so a montage does not change look at every cut. Order:
+
+```
+lut3d -> tone (lift/roll/gamma/saturation) -> halation (threshold + gblur + warm mix,
+screen-blended) -> chroma (rgbashift) -> vignette -> grain (noise, seeded) -> unsharp
+```
+
+Presets: `clean`, `film`, `analog`, `print`; every key can be overridden. Numbers that were
+measured on a flat grey field rather than guessed: `vignette=angle` 0.30 leaves corners at 83%
+of centre luma, 0.55 at 52%, 0.75 at 25% - so the presets stop at 0.42. Grain at `alls=3`
+measures ~2.1/255 of frame-to-frame change; `alls=8` is the analog preset and is already
+loud. `colorlevels` tops out at `rimax=1`, which is why the glow is re-expanded with a
+`curves` point instead of a gain.
+
+Grain is skipped automatically on a `pixelate` project unless it is asked for by name: grain on
+a block grid reads as a broken palette.
+
+### Shutter (motion blur)
+
+`look.finish.shutter: {samples: N}` renders at `fps * N` and folds with
+`tmix=frames=N`, then `trim=start_frame=N-1` and back to the delivery fps. Cost is linear in
+N, so it is a delivery decision: turn it on for hero moves, expect 2× render time at N=2.
+`--slices` is forced to 1 in this mode (each slice would average across its own boundary and
+the seam would show).
+
+## 12. Sound: cue bed, duck, master
+
+`audio.cues` is rendered by `lib/audio.py` into one cached stereo wav (`build/<name>/audio/cues-*.wav`)
+and mixed as a single track, because `amix` divides by track count: eight separate cue files
+would each cost ~6 dB of headroom for nothing. Each cue is seeded from its own parameters, so
+reordering the list cannot change how a cue sounds. `audio.room` adds three early reflections
+(11/23/41 ms, decorrelated) - not a reverb, just enough that a cue stops reading as a dry
+sample dropped on the timeline.
+
+`audio.master` turns on a **two-pass linear** loudness master: `assemble` renders the mix to
+`premix.wav`, measures it with `loudnorm ... print_format=json`, then applies
+`loudnorm=linear=true:measured_*=...`. Linear mode corrects with one static gain, so nothing
+pumps - that is the difference between "normalized" and "mastered". An `alimiter` follows it,
+set 0.4 dB below the ceiling: AAC adds inter-sample overshoot after the filter runs, and

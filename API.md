@@ -99,12 +99,19 @@ python scripts/api_index.py
 vs.py api preview
 ```
 
+### sfx — 
+
+```bash
+vs.py sfx "whoosh transition" --top 8
+vs.py sfx --get 12345 --out assets/sfx --name whoosh-01
+```
+
 ## 场景里可用的注入 API
 
 - `Scene`: ``
 - `Anim`: ``
 - `Kit`: ``
-- `flags`: `crf`, `data`, `duration`, `ffmpeg`, `fps`, `gpu`, `height`, `hold`, `jpeg`, `out`, `preset`, `probe`, `progress`, `ready_timeout`, `reboot`, `runtimes`, `scene`, `sig`, `still`, `url`, `width`
+- `flags`: `crf`, `data`, `debug`, `duration`, `ffmpeg`, `fps`, `gpu`, `height`, `hold`, `jpeg`, `out`, `preset`, `probe`, `progress`, `ready_timeout`, `reboot`, `runtimes`, `scale`, `scene`, `sig`, `still`, `url`, `width`
 
 ## 命令一览
 
@@ -115,6 +122,7 @@ vs.py api preview
 | `libs` |  | `--install`, `--verbose`, `--quiet`, `--limit` |
 | `sprite` |  | `--out`, `--width`, `--height`, `--colors`, `--alpha-cutoff`, `--verbose`, `--quiet`, `--limit` |
 | `beats` |  | `--sensitivity`, `--min-gap`, `--cuts`, `--min-len`, `--verbose`, `--quiet`, `--limit` |
+| `sfx` |  | `--get`, `--token`, `--access-token`, `--test`, `--licence`, `--top`, `--sort`, `--min-dur`, `--max-dur`, `--out`, `--name`, `--quality`, `--kind`, `- |
 | `init` |  | `--name`, `--duration`, `--verbose`, `--quiet`, `--limit` |
 | `render` |  | `--jobs`, `--force`, `--seed`, `--verbose`, `--quiet`, `--limit`, `--slices`, `--preset`, `--jpeg`, `--reboot`, `--incremental`, `--no-gpu` |
 | `assemble` |  | `--out`, `--verbose`, `--quiet`, `--limit` |
@@ -131,6 +139,8 @@ vs.py api preview
 | `montage` |  | `--music`, `--out`, `--duration`, `--style`, `--title`, `--width`, `--height`, `--fps`, `--verbose`, `--quiet`, `--limit` |
 | `plan` |  | `--seed`, `--verbose`, `--quiet`, `--limit`, `--slices`, `--jobs`, `--preset`, `--jpeg`, `--reboot`, `--incremental`, `--no-gpu` |
 | `selftest` |  | `--jobs`, `--keep`, `--verbose`, `--quiet`, `--limit` |
+| `rehearse` |  | `--verbose`, `--quiet`, `--limit`, `--at`, `--scale`, `--fps`, `--jpeg`, `--no-sheet` |
+| `scrub` |  | `--verbose`, `--quiet`, `--limit`, `--out`, `--open` |
 | `check` |  | `--verbose`, `--quiet`, `--limit`, `--stride` |
 | `patch` |  | `--verbose`, `--quiet`, `--limit` |
 | `audio` |  | `--verbose`, `--quiet`, `--limit`, `--cues`, `--out`, `--duration`, `--check` |

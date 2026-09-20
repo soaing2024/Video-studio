@@ -46,7 +46,40 @@ def hold_args(seg: dict) -> list[str]:
     return ["--hold", ",".join(f"{float(a):.3f}-{float(b):.3f}" for a, b in holds)]
 
 
-RUNTIME_FILES = ("scene.js", "anim.js", "kit.js", "three-kit.js", "director.js")
+RUNTIME_FILES = ("scene.js", "anim.js", "phys.js", "look.js", "kit.js", "three-kit.js", "director.js")
+
+
+def shutter_samples(spec: dict) -> int:
+    """Oversampling factor for shutter-angle motion blur (look.finish.shutter).
+
+    Frames are rendered N times denser and averaged, so a fast move smears across the
+    exposure the way a real shutter would. Cost is linear in N: this is a delivery
+    decision, not a default. 1 means off."""
+    fin = (spec.get("look") or {}).get("finish") or {}
+    if not isinstance(fin, dict):
+        return 1
+    sh = fin.get("shutter")
+    if sh in (None, False):
+        return 1
+    if sh is True:
+        n = 2
+    elif isinstance(sh, dict):
+        n = int(sh.get("samples", 2) or 2)
+    else:
+        n = int(sh)
+    return max(1, min(4, n))
+
+
+def render_fps(spec: dict) -> int:
+    """Frames per second the scene is actually seeked at (target fps x shutter samples)."""
+    return int(spec["video"]["fps"]) * shutter_samples(spec)
+
+
+def render_span(spec: dict, seg: dict) -> float:
+    """Clip length to render for a take: the shot plus the frames the shutter fold eats."""
+    n = shutter_samples(spec)
+    extra = (n - 1) / float(render_fps(spec)) if n > 1 else 0.0
+    return float(seg["duration"]) + extra
 
 
 def libs_for(spec: dict, seg: dict | None = None) -> list[Path]:
@@ -89,6 +122,7 @@ def _key(spec: dict, seg: dict, w: int, h: int) -> str:
             st = p.stat()
             hsh.update(f"{st.st_size}:{int(st.st_mtime)}".encode())
     hsh.update(f"{w}x{h}@{spec['video']['fps']}:{float(seg['duration'])}".encode())
+    hsh.update(f"shutter={shutter_samples(spec)}".encode())
     hsh.update(json.dumps(seg.get("hold") or [], sort_keys=True).encode())
     # A vendored library is part of the picture: upgrading it must invalidate the cache.
     hsh.update(libs.fingerprint(list(spec.get("libs") or []) + list(seg.get("libs") or [])).encode())
@@ -172,7 +206,7 @@ def render_segment(spec: dict, seg: dict, ffmpeg: str, node: str, force: bool = 
 
     cmd = [node, str(runtime.SKILL_DIR / "scripts" / "render_segment.mjs"),
            "--scene", str(tpl), "--out", str(out), "--data", str(data_file),
-           "--fps", str(spec["video"]["fps"]), "--duration", str(seg["duration"]),
+           "--fps", str(render_fps(spec)), "--duration", f"{render_span(spec, seg):.6f}",
            "--width", str(w), "--height", str(h), "--ffmpeg", ffmpeg,
            "--crf", str((spec.get("render") or {}).get("crf", 12))]
     cmd += hold_args(seg) + encode_args(spec, seg, w, h) + runtime_args(spec, seg)
@@ -436,6 +470,11 @@ def render_sliced(spec: dict, seg: dict, ffmpeg: str, node: str, slices: int, jo
     w, h, _ = work_size(spec)
     fps = int(spec["video"]["fps"])
     duration = float(seg["duration"])
+    if shutter_samples(spec) > 1 and slices > 1:
+        # Every slice would average across its own boundary, and the seam would show; the
+        # shutter path renders as one process and says so instead of failing silently.
+        log("  shutter: slices forced to 1 (motion blur needs neighbouring frames)")
+        slices = 1
     out = segment_path(spec, seg["id"])
     if not force and out.is_file() and out.with_suffix(".key").is_file():
         key = _key(spec, seg, w, h)
@@ -492,7 +531,7 @@ def render_sliced(spec: dict, seg: dict, ffmpeg: str, node: str, slices: int, jo
                                for a, b in holds if b > start and a < start + span)
         cmd = [node, str(runtime.SKILL_DIR / "scripts" / "render_segment.mjs"),
                "--scene", str(scene_path(seg)), "--out", str(part), "--data", str(data_file),
-               "--fps", str(fps), "--duration", f"{span:.6f}",
+               "--fps", str(render_fps(spec)), "--duration", f"{span:.6f}",
                "--width", str(w), "--height", str(h), "--ffmpeg", ffmpeg,
                "--crf", str((spec.get("render") or {}).get("crf", 12))]
         if local_holds:

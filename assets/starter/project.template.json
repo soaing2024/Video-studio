@@ -32,8 +32,33 @@
     "progress_bar": { "height": 3, "color": "#E1322A", "opacity": 0.85 }
   }
 
+  // 光学完成度：整片的镜头+胶片层，放在合成之后，不改你的版式。
+  // preset: clean（不做事）/ film / analog / print；下面每一项都可以单独覆盖。
+  // 数值是刻意保守的：颗粒 alls=3 大约是 2.1/255 的帧间变化。
+  // "finish": {
+  //   "preset": "film",
+  //   "halation": { "amount": 0.14, "sigma": 16, "threshold": 0.70, "warmth": 0.35 },
+  //   "grain": { "amount": 3, "chroma": 0.3 },
+  //   "chroma": { "px": 1 },
+  //   "vignette": { "angle": 0.30 },
+  //   "shutter": { "samples": 2 }   // 运动模糊：渲染量 ×2，只给英雄镜头用
+  // }
+
   // 音乐床：默认不配（没有轨道时 verify 不检查音频）。
   // 要配就加回这个形状，目标 mean −45…−10 dB，不要用 loudnorm（会把床推到 −18 dB 左右）：
   // "audio": { "tracks": [ { "src": "assets/bed.m4a", "gain_db": -8.5,
   //                         "fade_in": 2, "fade_out": 3, "loop": true } ] }
+
+  // 声音：tracks 是音乐/旁白，cues 是本地合成的音效床（不用找素材、不用授权）。
+  // master 是两遍线性响度母版（-14 LUFS / -1 dBTP 是平台常见目标）。
+  // "audio": {
+  //   "tracks": [ { "src": "assets/bed.m4a", "gain_db": -8.5,
+  //                 "fade_in": 2, "fade_out": 3, "loop": true } ],
+  //   "room": 0.35,
+  //   "cues": [
+  //     { "t": 0.62, "cue": "whoosh", "dur": 0.8 },
+  //     { "t": 2.70, "cue": "impact", "gain_db": -3 }
+  //   ],
+  //   "master": { "lufs": -14, "tp": -1.0, "lra": 11 }
+  // }
 }

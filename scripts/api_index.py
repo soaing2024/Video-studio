@@ -48,6 +48,8 @@ EXAMPLES = {
               "vs.py audio work/mine --check"],
     "card": ["vs.py card work/mine --title 'Star it.' --cn '去点亮 Star'"],
     "api": ["python scripts/api_index.py", "vs.py api preview"],
+    "sfx": ['vs.py sfx "whoosh transition" --top 8',
+            "vs.py sfx --get 12345 --out assets/sfx --name whoosh-01"],
 }
 
 
@@ -138,7 +140,7 @@ def main() -> int:
             py[rel] = fns
 
     js = {}
-    for n in ("scene.js", "anim.js", "kit.js", "three-kit.js", "director.js"):
+    for n in ("scene.js", "anim.js", "phys.js", "kit.js", "three-kit.js", "director.js"):
         p = SKILL / "assets" / "runtime" / n
         if p.is_file():
             s = js_surface(p)

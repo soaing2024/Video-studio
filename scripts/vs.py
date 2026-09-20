@@ -6,6 +6,7 @@
     python vs.py libs [--install <name>...]
     python vs.py sprite <image> [--out dir] [--width 64 --height 96 --colors 12]
     python vs.py beats <audio> [--cuts <seconds>]
+    python vs.py sfx "<query>" [--get ID] [--out assets/sfx]
     python vs.py init <dir> [--name x] [--duration 20]
     python vs.py render <project.json> [--jobs N] [--force]
     python vs.py assemble <project.json> [--out out.mp4]
@@ -38,7 +39,8 @@ from lib import (  # noqa: E402
     analyze,
     fmt,
     assemble, beats, brief as brief_mod, choreography, imagegen, libs, montage, motion,
-    narrate, probe, render, runtime, sprite, spec as specmod, style, tts, verify,
+    finish, narrate, probe, rehearse, render, runtime, sfx as sfxmod, sprite, spec as specmod,
+    style, tts, verify,
 )
 
 SKILL = runtime.SKILL_DIR
@@ -138,6 +140,17 @@ CREDITS_STUB = """# 素材与授权
 每个外部素材一行：文件名 / 来源页 / 作者 / 授权 / 是否需署名。
 取用规则见技能的 references/libraries.md。
 """
+
+
+def cmd_sfx(args) -> int:
+    """Search Freesound or fetch one effect; the licence gate decides what may be automated."""
+    rep = sfxmod.run(query=args.query, get=args.get, token=args.token,
+                     access_token=args.access_token, test=args.test, mode=args.licence,
+                     top=args.top, sort=args.sort, min_dur=args.min_dur, max_dur=args.max_dur,
+                     out=args.out, name=args.name, quality=args.quality, kind=args.kind,
+                     credits=args.credits, allow_risky=args.allow_risky, dry_run=args.dry_run)
+    fmt.emit(rep, human=sfxmod.human(rep))
+    return 0 if rep.get("ok") else 1
 
 
 def cmd_init(args) -> int:
@@ -568,6 +581,32 @@ def build_parser() -> argparse.ArgumentParser:
     bt.add_argument("--min-len", type=float, default=1.2)
     bt.set_defaults(func=cmd_beats)
 
+    sf = sub.add_parser("sfx", help="search or fetch a Freesound effect (licence-gated)")
+    sf.add_argument("query", nargs="?", help="search text, e.g. 'whoosh transition'")
+    sf.add_argument("--get", metavar="ID|URL", help="fetch this sound instead of searching")
+    sf.add_argument("--token", help="store a Freesound API key outside the repo")
+    sf.add_argument("--access-token", dest="access_token",
+                    help="store an OAuth2 token for original-quality downloads")
+    sf.add_argument("--test", action="store_true", help="one-result search to verify the key")
+    sf.add_argument("--licence", "--license", dest="licence", choices=("cc0", "by", "all"),
+                    default="cc0",
+                    help="cc0 (default) | by (adds an attribution row) | all (flagged)")
+    sf.add_argument("--top", type=int, default=12, help="results to show")
+    sf.add_argument("--sort", default="score", choices=sfxmod.SORTS)
+    sf.add_argument("--min-dur", type=float)
+    sf.add_argument("--max-dur", type=float)
+    sf.add_argument("--out", default="assets/sfx", help="where the fetched file lands")
+    sf.add_argument("--name", help="file slug for the fetched sound")
+    sf.add_argument("--quality", choices=("preview", "original"), default="preview",
+                    help="preview = HQ mp3, no OAuth2; original needs an access token")
+    sf.add_argument("--kind", choices=("wav", "source"), default="wav",
+                    help="convert to 48 kHz wav, or keep the source file")
+    sf.add_argument("--credits", help="CREDITS.md to append to (default: <out>/../CREDITS.md)")
+    sf.add_argument("--allow-risky", action="store_true",
+                    help="accept BY-SA / NC / Sampling+ (not a commercial deliverable)")
+    sf.add_argument("--dry-run", action="store_true", help="print the request, send nothing")
+    sf.set_defaults(func=cmd_sfx)
+
     ini = sub.add_parser("init", help="scaffold a project directory")
     ini.add_argument("dir", nargs="?", default=".")
     ini.add_argument("--name")
@@ -727,6 +766,8 @@ def _cmd_plan_v2(args) -> int:
     issues = specmod.validate(spec)
     w, h, _ = render.work_size(spec)
     frames = int(round(float(spec["duration"]) * spec["video"]["fps"]))
+    shutter = render.shutter_samples(spec)
+    frames = int(round(float(spec["duration"]) * spec["video"]["fps"])) * shutter
     slices = int(getattr(args, "slices", 1) or 1)
     jobs = render.safe_jobs(w, h, int(getattr(args, "jobs", 0) or spec["render"].get("jobs", 2)),
                             log=fmt.note)
@@ -741,13 +782,22 @@ def _cmd_plan_v2(args) -> int:
     advice = []
     if per > 60 and render.png_kind(spec) == "png":
         advice.append("use the default fast PNG (drop --png-compression default): -75% per frame")
-    if slices <= 1 and specmod.planned_duration(spec) > 3:
+    if slices <= 1 and shutter == 1 and specmod.planned_duration(spec) > 3:
         advice.append(f"add --slices {min(8, max(2, jobs * 2))} --jobs {jobs}: "
                       f"a single take renders in one process otherwise")
+    if shutter > 1:
+        advice.append(f"shutter x{shutter}: {frames} frames to render, slices forced to 1")
     if gb is not None and gb < 4 and jobs > 2:
+        advice.append(f"shutter x{shutter}: {frames} frames to render, slices forced to 1")
         advice.append(f"only {gb:.1f} GB free: keep --jobs <= 2, x264 buffers ~12 MB/frame at 4K")
     out = {"ok": not [i for i in issues if i["level"] == "error"], "which": "plan",
            "frames": frames, "size": [w, h], "png_kind": render.png_kind(spec),
+           "shutter_samples": shutter,
+           "finish": finish.describe(finish.resolve(spec.get("look") or {},
+                                      pixelate=bool((spec.get("look") or {}).get("pixelate")))),
+           "audio_tracks": len((spec.get("audio") or {}).get("tracks") or []),
+           "audio_cues": len((spec.get("audio") or {}).get("cues") or []),
+           "master": (spec.get("audio") or {}).get("master"),
            "ms_per_frame": round(per), "slices": slices, "jobs": jobs, "free_gb": gb,
            "est_wall_min": round(wall / 60, 1), "cached_segments": cached,
            "issues": issues, "advice": advice}
@@ -893,6 +943,40 @@ def _inject_common(parser):
                  human=json.dumps(fmt.diff_lines(args.file), ensure_ascii=False)[:1200])
         return 0
 
+    # (registered below, after the rehearsal commands)
+    def cmd_rehearse(args):
+        """A draft you can watch: 35% of the pixels, 12 fps, JPEG, no delivery clip touched."""
+        spec = spec_from(args)
+        ffmpeg, node = runtime.find_ffmpeg(), runtime.find_node()
+        rep = rehearse.draft(spec, ffmpeg, node, at=args.at, scale=args.scale,
+                             fps=args.fps, jpeg=args.jpeg,
+                             sheet=not getattr(args, "no_sheet", False), log=fmt.note)
+        fmt.emit(rep, human=rehearse.summary_line(rep) +
+                 "\n  (draft only: no delivery clip, cache key or output file was touched)")
+        return 0
+
+    _add("rehearse", "cheap draft render: watch timing before the delivery render", cmd_rehearse,
+         **{"project": {},
+            "--at": dict(default=None, help="a:b seconds to rehearse; default the whole shot"),
+            "--scale": dict(type=float, default=0.35, help="capture scale (0.35 = 35%% pixels)"),
+            "--fps": dict(type=int, default=12, help="draft frame rate"),
+            "--jpeg": dict(type=int, default=85, help="draft JPEG quality"),
+            "--no-sheet": dict(action="store_true", help="skip the contact sheet")})
+
+    def cmd_scrub(args):
+        """An interactive page that drives the real scene: the cheapest rehearsal there is."""
+        spec = spec_from(args)
+        rep = rehearse.scrub_html(spec, out=args.out, log=fmt.note)
+        if getattr(args, "open", False):
+            import webbrowser
+            webbrowser.open(rep["html"])
+        fmt.emit(rep, human=f"scrub page -> {rep['html']}\n  {rep['hint']}")
+        return 0
+
+    _add("scrub", "interactive scrub page: no render, real scene, real timing", cmd_scrub,
+         **{"project": {},
+            "--out": dict(default=None, help="where to write the page (default build/<name>/scrub.html)"),
+            "--open": dict(action="store_true", help="open it in the default browser")})
     _add("check", "pre-render self-check: timeline scan + typography calibration", cmd_check,
          **{"project": {}, "--stride": dict(type=float, default=0.25)})
     _add("patch", "hash-checked multi-edit patcher", cmd_patch, **{"edits": {}})

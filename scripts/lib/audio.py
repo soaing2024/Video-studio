@@ -14,8 +14,10 @@ cues.json: {"cues": [{"t": 0.62, "cue": "click", "pan": -0.2},
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
+import re
 import subprocess
 import sys
 import wave
@@ -124,14 +126,63 @@ CUES = {"click": _click, "tick": _tick, "pop": _pop, "whoosh": _whoosh,
         "impact": _impact, "riser": _riser, "chime": _chime, "sparkle": _sparkle}
 
 
+def _cue_seed(cue: dict) -> int:
+    """A cue's own seed, so reordering cues cannot change any single cue's noise.
+
+    The module RNG used to advance across the whole bed, which made the same cue sound
+    different depending on what came before it."""
+    payload = json.dumps({k: v for k, v in sorted(cue.items()) if not k.startswith("_")},
+                        sort_keys=True, ensure_ascii=False, default=str)
+    return int(hashlib.sha256(payload.encode("utf-8")).hexdigest()[:8], 16)
+
+
+def build_bed(spec: dict, cues: list[dict], duration: float, log=print) -> str:
+    """Render the project's cue list to one cached stereo wav and return its path.
+
+    A project declares cues as `audio.cues`; `assemble` calls this so a cue bed is part of
+    the mix instead of something the author has to remember to build by hand. Cached by
+    the cue list and the take length, so a re-render never pays twice."""
+    digest = hashlib.sha256(json.dumps(
+        {"cues": cues, "duration": round(float(duration), 3)},
+        sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")).hexdigest()[:12]
+    out = Path(spec["base_dir"]) / "build" / spec["name"] / "audio" / f"cues-{digest}.wav"
+    if out.is_file():
+        return str(out)
+    mix, info = render_cues(cues, duration, room=float((spec.get("audio") or {}).get("room", 0.0)))
+    write_wav(mix, out)
+    log(f"  cue bed: {info['cues']} cue(s) {info['by_kind']} -> {out.name}")
+    return str(out)
+
+
+def measure_lufs(ffmpeg: str, path: str | Path, target: float = -14.0,
+                 true_peak: float = -1.0) -> dict:
+    """Integrated loudness and true peak, the numbers a delivery master is judged on."""
+    proc = subprocess.run(
+        [ffmpeg, "-hide_banner", "-nostats", "-i", str(path), "-af",
+         f"loudnorm=I={target}:TP={true_peak}:LRA=11:print_format=json", "-f", "null", "-"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace")
+    blocks = re.findall(r"\{[^{}]*\"input_i\"[^{}]*\}", proc.stderr, re.S)
+    if not blocks:
+        return {"ok": False, "error": "could not measure loudness"}
+    data = json.loads(blocks[-1])
+    lufs = float(data["input_i"])
+    tp = float(data["input_tp"])
+    return {"ok": abs(lufs - target) <= 1.5 and tp <= true_peak + 0.4,
+            "lufs": lufs, "true_peak_db": tp, "target_lufs": target,
+            "target_tp": true_peak, "lra": float(data.get("input_lra", 0) or 0)}
+
+
 def render_cues(cues: list[dict], duration: float, gain_db: float = 0.0,
-                target_mean_db: float = TARGET_MEAN_DB) -> tuple[np.ndarray, dict]:
+                target_mean_db: float = TARGET_MEAN_DB,
+                room: float = 0.0) -> tuple[np.ndarray, dict]:
     """One pre-mixed stereo bed. One file in the project, so `amix` never sees N tracks."""
     n = int(SR * duration)
     L, R = np.zeros(n), np.zeros(n)
     used = {}
     for c in cues:
         fn = CUES.get(str(c.get("cue")))
+        global _RNG
+        _RNG = np.random.default_rng(_cue_seed(c))   # per-cue, order-independent
         if fn is None:
             raise ValueError(f"unknown cue {c.get('cue')!r}; available: {sorted(CUES)}")
         kw = {k: v for k, v in c.items() if k in ("dur", "f0", "f1", "f", "bright", "count", "spread", "base")}
@@ -144,6 +195,16 @@ def render_cues(cues: list[dict], duration: float, gain_db: float = 0.0,
         L[i0:i0 + m] += sig[:m] * math.sqrt((1 - pan) / 2)
         R[i0:i0 + m] += sig[:m] * math.sqrt((1 + pan) / 2)
         used[str(c["cue"])] = used.get(str(c["cue"]), 0) + 1
+    if room > 0:
+        # Three early reflections, decorrelated between the channels. Not a reverb: a room
+        # small enough that cues stop reading as "dry sample dropped on the timeline".
+        r = max(0.0, min(1.0, float(room)))
+        for delay_ms, g in ((11.0, 0.34), (23.0, 0.22), (41.0, 0.13)):
+            d = int(SR * delay_ms / 1000.0)
+            if d >= n:
+                continue
+            L[d:] += R[:n - d] * g * r
+            R[d:] += L[:n - d] * g * r * 0.92
     mix = np.stack([L, R], axis=1) * (10 ** (gain_db / 20))
     peak = float(np.max(np.abs(mix))) or 1e-9
     mix *= min(1.0, (10 ** (PEAK_CEIL_DB / 20)) / peak)

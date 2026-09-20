@@ -22,19 +22,25 @@ visual device, duration, handoffs), the visual direction, the audio plan, the as
 acceptance checklist. Stop there and wait for an explicit yes. Do not scaffold, compile, generate
 images or render before that approval, and re-confirm after any change the user asks for.
 
-**2. One write, one render, one export.** Once the plan is approved, the spec is written once, the
-piece is rendered once, and that render is the delivered file. Design is settled in the plan, on
-paper. A full `run` is the delivery step, not an exploration step: no "render it and see", no
-repeated full renders to compare options, no rendering a piece whose plan is still moving. If
-something is wrong after delivery, agree on the fix, revise the spec, and deliver one new round -
-rendering is not the iteration loop.
+**2. One write, one delivery render, one export.** Once the plan is approved, the spec is written
+once, the piece is rendered once, and that render is the delivered file. A full `run` is the
+delivery step, not an exploration step: no "render it and see", no repeated full renders to
+compare options, no rendering a piece whose plan is still moving. What you *may* do freely is
+the cheap rehearsal below. If something is wrong after delivery, agree on the fix, revise the
+spec, and deliver one new round - rendering is not the iteration loop.
 
-**3. Preview only when necessary.** `preview` is an exception, not the design loop. Do not sweep a
-still per beat "to check how it looks". Reason the still frame out on paper from the plan. Only a
-specific, stateable doubt that paper cannot settle - asset loading, font fallback, whether a
-composition holds at the real aspect - justifies rendering that one frame, and you should be able
-to say which doubt it answers. A preview is not a render, but previewing every beat is the old
-iterate-by-looking loop under a cheaper name.
+**3. Rehearse cheaply, preview deliberately.** Timing cannot be judged on paper, so watching it
+is allowed and expected - through the two rehearsals that never touch the delivery render:
+`vs.py scrub <project>` (an interactive page driving the real `seek(t)`: play, step frames,
+check safe areas) and `vs.py rehearse <project>` (a draft at a fraction of the pixels and
+frames, plus a contact sheet of the whole take). Both are for *timing, rhythm and handoffs*,
+which paper cannot settle at all.
+
+What is still gated is the still-frame question: do not sweep a still per beat "to check how it
+looks". Reason the frame out on paper from the plan first; only a specific, stateable doubt
+that paper cannot settle - asset loading, font fallback, whether a composition holds at the
+real aspect - justifies `preview` for that one frame, and you should be able to say which doubt
+it answers. Composition is judged at the rehearsal scale; a full-quality still is the exception.
 
 ## First move
 
@@ -90,6 +96,7 @@ Every command accepts `--json`, `--verbose` and `--quiet`; failures return
 | `probe <files...>` | decide how to use an asset |
 | `sprite <image> [--width 64 --height 96 --colors 12]` | image to pixel-art sprite plus shadow |
 | `beats <audio> [--cuts 60]` | beat times and montage cut points |
+| `sfx "whoosh" [--get ID] [--out dir]` | search Freesound or fetch one effect; licence-gated, writes CREDITS.md |
 | `voices` | list installed speech voices |
 | `narrate <project> --script s.txt` | synthesize narration, time the take to it, write subtitles |
 | `montage <media-dir> --music m.mp3 --out p.json` | beat-cut montage from existing footage |
@@ -102,6 +109,8 @@ Every command accepts `--json`, `--verbose` and `--quiet`; failures return
 | --- | --- |
 | `plan <project>` | dry run: problems, cache hits, frame budget, estimated render time |
 | `preview <project> [--segment id] [--at 2.0]` | one still frame, only for a doubt paper cannot settle |
+| `rehearse <project> [--at a:b] [--scale 0.35] [--fps 12]` | cheap draft you can watch, plus a contact sheet; never touches the delivery clips |
+| `scrub <project> [--open]` | interactive page driving the real scene: play, step frames, safe areas - no render at all |
 | `render <project> [--jobs N] [--slices N] [--force]` | render cached clips only |
 | `assemble <project> [--out f.mp4]` | cut, transition, mix, encode only |
 | `run <project> [--jobs N] [--slices N]` | all three, prints a JSON summary |
@@ -132,6 +141,15 @@ turn.
   "look": {
     "accent": "#e0455f",
     "grade": { "saturation": 1.06, "contrast": 1.04 },
+    "finish": {                    // lens + emulsion, applied to the whole frame after the fold
+      "preset": "film",            // clean | film | analog | print (or override any key below)
+      "halation": { "amount": 0.14, "sigma": 16, "threshold": 0.70, "warmth": 0.35 },
+      "grain": { "amount": 3, "chroma": 0.3, "seed": 20260920 },
+      "chroma": { "px": 1 },     // lateral chromatic aberration
+      "vignette": { "angle": 0.30 },
+      "shutter": { "samples": 2 }, // motion blur: render 2x denser, average. Doubles render time.
+      "lut": "assets/grade.cube"   // optional 3D LUT
+    },
     "pixelate": { "scale": 4, "colors": 16, "dither": "none" },
     "fade_in": 0.5, "fade_out": 0.8,
     "progress_bar": { "height": 4, "color": "#e0455f" }
@@ -145,6 +163,16 @@ turn.
     "tracks": [
       { "src": "assets/voice.wav", "at": 1.0, "gain_db": -3 },
       { "src": "assets/music.mp3", "gain_db": -26, "fade_in": 2, "fade_out": 3, "loop": true }
+    ],
+    // SFX: the cue bed is synthesized locally (no sample licensing) and pre-mixed to one wav.
+    "room": 0.35,
+    "cues": [
+      { "t": 0.62, "cue": "click", "pan": -0.2 },
+      { "t": 2.70, "cue": "whoosh", "dur": 0.8, "f0": 260, "f1": 1500 },
+      { "t": 24.55, "cue": "chime", "gain_db": -6 }
+    ],
+    // Master: two-pass linear loudnorm to a delivery target (+ limiter). Omit to skip.
+    "master": { "lufs": -14, "tp": -1.0, "lra": 11 }
     ]
   },
   "subtitles": { "src": "assets/subs.srt", "style": "FontName=Microsoft YaHei,FontSize=22,MarginV=36" }
@@ -188,6 +216,9 @@ what could be; `vs.py libs --install <name>` vendors one from npm at build time.
   Bodymovin export and it arrives parsed in `SCENE.assets` (a `file://` XHR would be blocked).
 - `anime` (MIT) - `Anim.timeline(seconds, build).seek(t)`, with the engine's autoplay and ticker
   left off.
+- `chroma-js` (BSD-3-Clause AND Apache-2.0, v3.2) - perceptual colour scales, Brewer
+  palettes, luminance and contrast checks. Pure functions, so it never needs a clock:
+  `chroma.scale(["#0d1b2a", "#3cd3d4"]).mode("lch").colors(7)`.
 - `three` (MIT, r186) - `Scene.three()` for a WebGL layer (plus `environment()` and `bloom()`),
   `Scene.css3d()` for real DOM placed in 3D, and `Scene.surface()` for a 2D canvas used as a
   texture. Combining 2D and 3D has its own document:
@@ -233,6 +264,9 @@ pass, and the list of skeletons that are already used up:
   whole pixels - sub-pixel movement destroys the style once magnified.
 - **Audio levels:** a music bed should measure a mean of roughly -45 to -10 dB in `verify`; voice
   around -18 to -12 dB. `amix` normalises by track count, so each added track costs about 6 dB.
+- **Sound effects carry their licence.** `vs.py sfx` searches Freesound CC0-only by default,
+  converts what it fetches to 48 kHz wav, and appends a `CREDITS.md` row; CC BY is opt-in with
+  `--licence by`, and BY-SA / NC / Sampling+ need `--allow-risky` (never for a commercial cut).
 - **Overlap the handoffs.** A transition whose exit finishes before its entrance begins reads as a
   slide deck however good the easing is; letting the two windows share 40-60% of their duration
   removes it, and whole-frame moves stay under ~1.2s with most of their change up front.
@@ -255,6 +289,13 @@ pass, and the list of skeletons that are already used up:
 - Planning, visual distinctiveness and generated imagery:
   [references/creative.md](references/creative.md).
 - Craft, from the animation/design tutorial canon - the twelve animation principles, the four
+- The twelve animation principles as a paste-ready prompt, each mapped to an executable
+  parameter and a measurable check: [references/principles-prompt.md](references/principles-prompt.md).
+  Written in Chinese, because that is how the request arrives.
+- Physical motion that still obeys `seek(t)` - springs, follow-through chains, ballistic,
+  pendulum, drag, seeded drift, and the traps: [references/motion-physics.md](references/motion-physics.md).
+- Optical finish and the cheaper rehearsal loop (what `rehearse` / `scrub` do, what the
+  audio bed and the two-pass master are): [references/pipeline.md](references/pipeline.md).
   presentation-design principles, composition and type-scale numbers, each turned into a
   checkable rule with its source: [references/craft.md](references/craft.md). Written in Chinese.
 - Libraries worth reaching for - icons, motion, footage, sound - with the licence and access rules for

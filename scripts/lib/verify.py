@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from . import probe, spec as specmod
+from . import audio as audiomod, probe, spec as specmod
 
 
 class Verifier:
@@ -178,14 +178,30 @@ class Verifier:
                      f"per frame {micro:.2f}, frozen intervals {frozen * 100:.0f}% "
                      f"(budget {budget * 100:.0f}%: {still_len:.1f}s of {total_len:.1f}s static)")
 
-        tracks = (spec.get("audio") or {}).get("tracks", [])
-        if tracks:
+        audio_cfg = spec.get("audio") or {}
+        tracks = audio_cfg.get("tracks", [])
+        cues = audio_cfg.get("cues") or []
+        if tracks or cues:
             loud = probe.loudness(ffmpeg, video)
             mean = loud.get("mean_volume")
             self.add("audio_present", mean is not None and mean > -60,
-                     f"mean {mean} dB, peak {loud.get('max_volume')} dB")
-            self.add("audio_level", mean is None or -45 < mean < -10,
-                     f"mean {mean} dB should sit between -45 and -10 for a background bed")
+                     f"mean {mean} dB, peak {loud.get('max_volume')} dB"
+                     + (f" ({len(cues)} cue(s), no music track)" if cues and not tracks else ""))
+            if tracks:
+                self.add("audio_level", mean is None or -45 < mean < -10,
+                         f"mean {mean} dB should sit between -45 and -10 for a background bed")
+            else:
+                # A cue-only mix is the programme, not a bed, so it may sit louder.
+                self.add("audio_level", mean is None or -45 < mean < -6,
+                         f"cue-only mix mean {mean} dB should sit between -45 and -6")
+            master = audio_cfg.get("master")
+            if master:
+                target = float(master.get("lufs", -14))
+                tp = float(master.get("tp", -1.0))
+                m = audiomod.measure_lufs(ffmpeg, video, target=target, true_peak=tp)
+                self.add("mastering", bool(m.get("ok")),
+                         f"{m.get('lufs')} LUFS / {m.get('true_peak_db')} dBTP vs target "
+                         f"{target} LUFS / {tp} dBTP")
         else:
             self.add("audio_present", not any(s["kind"] == "audio" for s in info.get("streams", [])),
                      "no audio configured, so none expected")
