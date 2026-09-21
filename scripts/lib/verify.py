@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from . import audio as audiomod, probe, spec as specmod
+from . import audio as audiomod, continuity, fmt, probe, spec as specmod
 
 
 class Verifier:
@@ -178,6 +178,20 @@ class Verifier:
                      f"change per second {mean_motion:.2f}/255 (need 2.2), p90 {p90_motion:.2f}, "
                      f"per frame {micro:.2f}, frozen intervals {frozen * 100:.0f}% "
                      f"(reported, not gated; {still_len:.1f}s of {total_len:.1f}s declared static)")
+
+        # Frame-level continuity is REPORTED here, not gated. `motion` above is deliberately an
+        # average (change per second at 6 fps), so a film that pops once per beat scores
+        # beautifully on it - which is exactly how a take can be all-green and still be
+        # unwatchable. The guarantee against that lives in the runtime (Motion.channel/shake/
+        # hit: every value retargets from where it is, over >= 4 frames, with oscillators snapped
+        # to a whole number of frames per cycle); this line is the accounting, so a nonzero
+        # count means something bypassed the runtime. `vs.py continuity --strict` gates it.
+        try:
+            rep = continuity.audit(video, self.ffmpeg,
+                                   fps=float(spec["video"].get("fps", 30)), windows=6)
+            self.add("continuity", True, rep["detail"] + " (reported, not gated)")
+        except fmt.VsError as e:
+            self.add("continuity", True, f"not measured ({e.code}): {e.fix_hint}")
 
         audio_cfg = spec.get("audio") or {}
         tracks = audio_cfg.get("tracks", [])

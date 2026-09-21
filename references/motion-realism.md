@@ -1,5 +1,61 @@
 # Motion prompts — how to get rich, physical movement instead of decoration
 
+## 0. 帧率是硬约束，不是风格选项
+
+在写任何运动之前先记住这条：**画面每秒只被采样 fps 次，超过这个承载能力的运动不是“更快”，而是另一种现象。**
+
+一次真实事故（2K/30fps 成片）量出来的数字：
+
+| 写法 | 实际含义 | 后果 |
+| --- | --- | --- |
+| `sin(t*61.0)` | 9.71 Hz = **3.09 帧/周期** | 相邻两帧落在正弦两端，单帧位移最大 16.7px，4.2% 的帧在“瞬移” |
+| 压暗 `min(1, dt/0.058)` | 上升沿 **1.7 帧** | 单帧内亮度跳 37–45%，逐帧看就是“闪现” |
+| 画面抖动增益 0.010 / 字幕增益 0.0035 | 两层位移差 **2.86 倍** | 字幕与画面相对滑移 8.8px，看起来像字幕在“漂” |
+
+三个结论：
+
+1. **载波 ≥5 帧/周期**（fps/5 Hz；30fps 即 6 Hz / 37.7 rad/s）。3 帧/周期是“跳”，5 帧/周期才是“震”。
+2. **任何一个绘制素材，单帧位移不得超过本次行程的 30%**；重新定向必须从“当前显示的值”出发，而不是从上一个目标值。
+3. **全局曝光/不透明度的上升沿 ≥4 帧**。想“瞬时”就压缩到 4–6 帧，而不是 1–2 帧。
+
+### 不要手写，用注入的 `Motion`
+
+渲染器在场景之前注入 `assets/runtime/motion.js`（并注入 `SCENE.fps`）。这些基元在构造上就不可能产生跳变：
+
+```js
+const x = Motion.channel('title.x', 0);      // 参数：永远从当前值出发
+const op = Motion.channel('title.opacity', 0);
+
+window.seek = (t) => {
+  if (t >= 2) { x.set(t, 240, { in: 0.6 }); op.set(t, 1, { in: 0.35 }); }  // in 只是请求：
+  // 实际至少 4 帧，且单帧不超过行程 30% —— 你写 { in: 0 } 也一样
+
+  const [jx, jy] = Motion.shake(t, { amp: 1, hz: 9.7 });   // 9.7Hz 会被折到本 fps 可表达的
+  const H = Motion.hit(t, { at: 47.34, dark: 0.7, flash: 0.5, shake: 0.9 });
+  const ts = t - Motion.warp(t, HITS);                     // 卡肉：单调，永不倒流
+  draw({ x: x.at(t), opacity: op.at(t) * Motion.gate(t, { at: 2, in: 0.3 }),
+         dark: H.dark, flash: H.flash, jitter: [jx * H.shake, jy * H.shake] }, ts);
+};
+```
+
+- `Motion.channel()` — 参数。`set()` 从当前值改目标，至少 4 帧，单帧≤行程 30%，到时精确到达。
+- `Motion.osc()/shake()` — 振荡器。取整为“每周期整数帧且 ≥5 帧”，因此采样序列严格周期、不会落到两个极端。
+- `Motion.hit()` — 撞击。攻击沿 ≥4 帧（线性，单帧≤25%），释放指数衰减；抖动来自 `shake()`。
+- `Motion.warp()` — 卡肉时间扭曲，单调，d/dt 始终 <1。
+- `Motion.gate()` — 出场/退场各有下限，不会“突脸”。
+- `Motion.report()` — 每个通道自己记录“最大单帧位移 / 最宽行程”，所以“有迹可循”是可证明的，不是口头保证。
+
+### 证明与账目
+
+```bash
+node scripts/motion_selftest.mjs                  # 33 条断言，测 24/30/60fps 下“跳变不可能”
+python scripts/continuity_audit.py out/film.mp4   # 成片逐帧账目：孤立单帧尖峰 + 分类（报告，不拦截）
+```
+
+绕过运行时的写法会在 `check` 与 `verify` 里被点名（带行号与替换用的基元）；故意要频闪的声明 `// vs:ok-fast-oscillator <理由>` 即可，它降级为警告而不会阻断出片。
+
+---
+
 Three things live here: the motion spec to write before touching code, prompt blocks a user can
 paste to demand better motion, and the concrete vocabulary that turns a feeling into numbers.
 

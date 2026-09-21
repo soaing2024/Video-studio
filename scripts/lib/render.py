@@ -46,7 +46,8 @@ def hold_args(seg: dict) -> list[str]:
     return ["--hold", ",".join(f"{float(a):.3f}-{float(b):.3f}" for a, b in holds)]
 
 
-RUNTIME_FILES = ("scene.js", "anim.js", "phys.js", "look.js", "kit.js", "three-kit.js", "director.js")
+RUNTIME_FILES = ("scene.js", "anim.js", "phys.js", "look.js", "kit.js", "three-kit.js",
+                 "director.js", "motion.js")
 
 
 def resolve_slices(spec: dict, cli_value=None) -> int:
@@ -209,6 +210,10 @@ def prepare_assets(spec: dict, seg: dict, log=print) -> dict:
     payload["assets"] = {k: (_file_url(v) if isinstance(v, str) else v) for k, v in assets.items()}
     payload["duration"] = float(seg["duration"])
     payload["id"] = seg["id"]
+    # The delivery frame rate reaches the page so the runtime's motion primitives can compute
+    # the band this format can actually carry (see assets/runtime/motion.js). Without it every
+    # scene has to guess, and a guessed carrier is how a shake turns into a jump.
+    payload["fps"] = int((spec.get("video") or {}).get("fps") or 30)
     payload.setdefault("accent", (spec.get("look") or {}).get("accent", "#e0455f"))
     return payload
 

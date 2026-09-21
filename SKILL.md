@@ -133,6 +133,7 @@ Every command accepts `--json`, `--verbose` and `--quiet`; failures return
 | command | use it for |
 | --- | --- |
 | `check <project>` | pre-render timeline scan: ghost elements, out-of-frame text, NaN transforms, CJK/contrast |
+| `continuity <video> [--strict]` | frame-level continuity accounting: isolated single-frame steps classified as exposure_step / jitter_aliased / drift_ramp / content_swap; reported, not fatal, unless `--strict` |
 | `patch <edits.json>` | hash-checked multi-edit patcher with syntax checks and full rollback |
 | `audio [<project>] --cues cues.json` / `--check` | build or measure the audio bed against the mix target |
 | `card <dir>` | standalone closing card project |
@@ -279,6 +280,18 @@ pass, and the list of skeletons that are already used up:
   flag of the multi-shot/montage shape and is rejected by single-take projects.
 - **Every animated value must be a pure function of `t`.** No CSS transitions, no
   `requestAnimationFrame`, no wall-clock time inside a scene.
+- **Every drawn value must be traceable frame by frame.** A value that moves is a value
+  somebody has to be able to follow: no frame may cover an unbounded share of a move, and
+  nothing may change faster than the delivery rate can carry. Never hand-roll it - the
+  injected `Motion` runtime (`assets/runtime/motion.js`) evaluates every parameter as a
+  continuous path: `Motion.channel()` retargets from the value on screen right now, takes at
+  least 4 frames (never shorter, whatever you ask for) and caps any single frame at 30% of
+  the travel; `Motion.osc()/shake()` snap to a whole number of frames per cycle (>= 5), so a
+  carrier can never land on two extremes in a row; `Motion.hit()` gives an impact a >= 4
+  frame attack with monotonic `Motion.warp()` for 卡肉; `Motion.gate()` floors both ramps so
+  nothing enters frame unannounced. The band comes from the delivery fps (`SCENE.fps`), so
+  the same scene at 60 fps gets a wider one. `node scripts/motion_selftest.mjs` measures the
+  guarantee; `continuity_audit.py` is the accounting for anything that went around it.
 - **An external library is only usable if it can be driven from `t`, and only if its dist file
   lives in the repo.** No CDN, no network at render time, no library ticker. If it cannot be
   seeked (`seek` / `goToAndStop` / `position`), it belongs in asset preparation, not in a scene.
@@ -355,6 +368,9 @@ pass, and the list of skeletons that are already used up:
   the numbers that fix each: [references/rhythm-handoff.md](references/rhythm-handoff.md). Written in Chinese.
 - Motion realism - the seven-line motion spec, twelve hooks, per-feeling parameter sets:
   [references/motion-realism.md](references/motion-realism.md). Written in Chinese.
+- The frame rate as a hard constraint - carrier frequency vs fps, the traceability rule, the
+  injected `Motion` primitives and the measured guarantee:
+  [references/motion-realism.md](references/motion-realism.md) §0. Written in Chinese.
 - Fast lane and self-checks - `scripts/scaffold.py` builds a project from `assets/starter/`;
   `scripts/qc_video.py` measures region ink and prints ASCII frame maps; `scripts/taste_check.py`
   reports rhythm and composition; `scripts/beat_audit.py` audits the handoff timeline.

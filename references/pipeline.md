@@ -116,9 +116,28 @@ the subject into an offscreen canvas, switch to `source-atop`, fill the gradient
 | `pixel_blocks` | bilinear instead of nearest upscaling |
 | `palette` | re-quantisation error vs the requested palette size |
 | `audio_present` / `audio_level` | silent mix, or a bed that is 20 dB too quiet |
+| `motion` | a slideshow: mean change per second at 6 fps, threshold 2.2/255 |
+| `continuity` | **reported, not gated**: isolated single-frame steps at the delivery fps, each classified as exposure_step / jitter_aliased / drift_ramp / content_swap. 0 is the expected count; anything else means a value went around `Motion` (see references/motion-realism.md §0) |
 
 Colour counts are useless on a lossy encode — that is why the palette check re-quantises to the
 requested size and measures the error instead.
+
+`continuity` is there because every other row is an *average*, and an average cannot see the one
+frame that does not belong: `motion` alone once scored 24.7/255 against a 2.2 threshold on a take
+whose worst frame moved 104/255 inside a single frame. It decodes at the delivery frame rate -
+not 6 fps - and classifies every flagged frame by measuring the real global displacement around
+it, so the report names the mechanism and not just the number.
+
+```bash
+python scripts/continuity_audit.py out/film.mp4           # report (exit 0)
+python scripts/continuity_audit.py out/film.mp4 --strict   # exit 1 above the reference ceiling
+```
+
+The guarantee that the count stays zero is not this script: it is the injected
+`assets/runtime/motion.js`, which makes a step unrepresentable instead of detectable (every
+parameter retargets from its current value over >= 4 frames with a 30% per-frame cap, oscillators
+snap to a whole number of frames per cycle, impacts get a linear >= 4 frame attack).
+`node scripts/motion_selftest.mjs` measures that guarantee at 24/30/60 fps.
 
 ## 8. Measured throughput
 

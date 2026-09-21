@@ -27,7 +27,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-from lib import analyze, fmt, render, runtime, spec as specmod  # noqa: E402
+from lib import analyze, fmt, motion_lint, render, runtime, spec as specmod  # noqa: E402
 
 CALIB_HTML = """<!doctype html><meta charset="utf-8"><style>
  body{margin:0;background:#f7f8fa;font-family:"Microsoft YaHei","Noto Sans SC",system-ui,sans-serif}
@@ -172,6 +172,14 @@ def main(argv=None) -> int:
               if v["spans"] and v["spans"][0][0] <= 0.001 and v["spans"][-1][1] > 1.0]
     problems = []
     warnings: list[dict] = []
+    # Motion representability is REPORTED, never blocking: the guarantee that a drawn element
+    # cannot jump lives in the runtime (assets/runtime/motion.js), which retargets every
+    # parameter from its current value over >= 4 frames and snaps oscillators to a whole
+    # number of frames per cycle. What is left here is the accounting of the sources that go
+    # around it, with the line and the primitive that replaces them.
+    motion = motion_lint.lint(spec)
+    warnings.extend(motion["problems"])
+    warnings.extend(motion["warnings"])
     if not scan.get("ready"):
         problems.append({"kind": "scene_not_ready", "detail": "window.seek never became ready"})
     for b in scan.get("broken", [])[:10]:
@@ -205,6 +213,7 @@ def main(argv=None) -> int:
 
     report = {"ok": not problems, "samples": scan.get("samples"), "stride": args.stride,
               "problems": problems, "warnings": warnings,
+              "motion": motion,
               "ghosts_visible_from_t0": ghosts[:12],
               "visibility": {k: {"text": v["text"], "size": v["size"], "spans": v["spans"][:8]}
                              for k, v in list(scan.get("visibility", {}).items())[:60]},
@@ -217,6 +226,9 @@ def main(argv=None) -> int:
              human=(f"check: {len(problems)} problem(s)"
                     + (f", {len(warnings)} warning(s)" if warnings else "")
                     + f" over {report['samples']} samples"
+                    + ("" if motion["ok"] else
+                       f"; motion: {len(motion['problems'])} value(s) outside the "
+                       f"{motion['fps']:g} fps band (see warnings)")
                     + (f"; {len(ghosts)} element(s) already visible at t=0" if ghosts else "")
                     + f" -> {out.name}"))
     if not args.json:
